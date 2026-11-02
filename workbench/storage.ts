@@ -294,7 +294,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
     if ((cause as { code?: string }).code === "EEXIST") {
       throw new StorageError(
         `Another instance is already using ${directory}. Close it and try again. `
-        + `If no Magentic process is running, delete ${lockPath} and retry.`,
+        + `If no Agentick process is running, delete ${lockPath} and retry.`,
       );
     }
     throw new StorageError(`Could not take the writer lock in ${directory}.`, { cause });
@@ -336,7 +336,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
       if (envelope.success && envelope.data.storageVersion !== STORAGE_VERSION) {
         throw new StorageError(
           `Workspace ${workspace} has storage version ${envelope.data.storageVersion}; this build reads version ${STORAGE_VERSION}. `
-          + `Upgrade Magentic, or move ${path} aside to start fresh.`,
+          + `Upgrade Agentick, or move ${path} aside to start fresh.`,
         );
       }
 

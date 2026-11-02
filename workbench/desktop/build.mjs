@@ -32,7 +32,7 @@ await writeFile(join(adapterDir, "package.json"), JSON.stringify({ name: "@langc
 for (const name of ["Start-Magentic.ps1", "Install.ps1", "Install.cmd", "Uninstall.ps1", "Uninstall.cmd", "README.txt", "RELEASE-NOTES.txt"]) await copyFile(join(desktop, name), join(destination, name));
 // The installer shows this version in Apps & features and the launcher logs it,
 // so a support request can name the exact package and runtime.
-await writeFile(join(destination, "version.json"), JSON.stringify({ name: "Magentic Developer", version, runtime: process.version, built: new Date().toISOString() }, null, 2));
+await writeFile(join(destination, "version.json"), JSON.stringify({ name: "Agentick Developer", version, runtime: process.version, built: new Date().toISOString() }, null, 2));
 await mkdir(join(destination, "licenses"));
 await copyFile(join(desktop, "licenses", "Node-LICENSE.txt"), join(destination, "licenses", "Node-LICENSE.txt"));
 // Bundled dependencies still need their notices even though their package
@@ -51,7 +51,7 @@ for (const result of [app, local, launcher, adapter]) {
     }
   }
 }
-let notices = "Magentic Developer bundles the following third-party packages.\nNode.js notices are in Node-LICENSE.txt.\n\n";
+let notices = "Agentick Developer bundles the following third-party packages.\nNode.js notices are in Node-LICENSE.txt.\n\n";
 for (const [name, { folder, pkg }] of packages) {
   notices += `${name} — ${pkg.license ?? "See package license"}\n`;
   for (const file of await readdir(folder)) {

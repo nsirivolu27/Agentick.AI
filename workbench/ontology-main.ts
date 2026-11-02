@@ -13,6 +13,6 @@ try {
   registerOntologyTools(server, reader);
   await server.connect(new StdioServerTransport());
 } catch {
-  console.error("Magentic Ontology could not start. Check MAGENTIC_ONTOLOGY_FILE, MAGENTIC_WORKSPACE and the configured token setting. No credentials were printed.");
+  console.error("Agentick Ontology could not start. Check MAGENTIC_ONTOLOGY_FILE, MAGENTIC_WORKSPACE and the configured token setting. No credentials were printed.");
   process.exitCode = 1;
 }

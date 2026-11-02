@@ -22,7 +22,7 @@
     </style>
   </defs>
 
-  <text x="24" y="34" font-size="22" font-weight="700" fill="#1f1b24">Magentic workbench: internal architecture</text>
+  <text x="24" y="34" font-size="22" font-weight="700" fill="#1f1b24">Agentick workbench: internal architecture</text>
   <text x="24" y="56" class="note">Personal workspace edition. Every arrow is a real call path in the code. Magenta marks the rules that gate an assistant: nothing answers or works without an approved, validly signed release.</text>
 
   <!-- CLIENTS -->
@@ -36,7 +36,7 @@
   <text x="54" y="192" class="box-file">browser.ts · home-view.ts · studio-view.ts · workflow-view.ts · review-views.ts · flow-model.ts · units.ts · ui.ts</text>
 
   <rect x="720" y="112" width="430" height="100" class="box"/>
-  <text x="734" y="134" class="box-title">VS Code extension (Magentic Workspace)</text>
+  <text x="734" y="134" class="box-title">VS Code extension (Agentick Workspace)</text>
   <text x="734" y="154" class="box-sub">Analyze / Build / Review against a Git repo. Worker: local model or an approved</text>
   <text x="734" y="172" class="box-sub">assistant, with its learning schedule and Learn now. Diffs are reviewed before apply.</text>
   <text x="734" y="192" class="box-file">extensions/vscode · editor-session.ts · editor-assistants.ts</text>

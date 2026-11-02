@@ -1,4 +1,4 @@
-# Magentic
+# Agentick
 
 ## Developer workspace preview
 
@@ -11,12 +11,12 @@ while the API and agent loop is verified.
 
 The sections below describe the original relay adapter.
 
-Magentic is the Model Context Protocol server for the
+Agentick is the Model Context Protocol server for the
 [LNKZ relay](https://github.com/nsirivolu27/LNKZ). It exposes conversation
 tools, resources and prompts to MCP clients, using the relay's authenticated
 REST API for every operation.
 
-Magentic owns MCP. LNKZ owns conversations and serves REST. REST is the seam
+Agentick owns MCP. LNKZ owns conversations and serves REST. REST is the seam
 between the two, and this repository is on the MCP side of it: no database, no
 conversation store, no import pipeline, no connector implementation, no
 authentication implementation, no console. Run a relay separately and point
@@ -127,7 +127,7 @@ The adapter uses local stdio for MCP traffic. It does not open a port or mount `
 
 ## Preserved MCP surface
 
-Magentic serves all 24 tool names:
+Agentick serves all 24 tool names:
 
 ```text
 save_conversation          import_conversation       get_conversation

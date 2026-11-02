@@ -1,6 +1,6 @@
-# Magentic: governed assistants inside real workflows
+# Agentick: governed assistants inside real workflows
 
-Magentic is a local workspace where a team trains an assistant on its own content, approves it the way it would approve a release, and then puts it to work inside the team's delivery workflow. It runs on a laptop with a local model, and everything it exposes is available over MCP, so it plugs into the tools a team already has.
+Agentick is a local workspace where a team trains an assistant on its own content, approves it the way it would approve a release, and then puts it to work inside the team's delivery workflow. It runs on a laptop with a local model, and everything it exposes is available over MCP, so it plugs into the tools a team already has.
 
 ## The rule that makes it safe to use
 

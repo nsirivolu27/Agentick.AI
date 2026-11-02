@@ -264,7 +264,7 @@ async function api(path: string, data?: unknown, workspace = selectedWorkspace):
   });
   const result = await response.json();
   if (response.status === 401 && accountsEnabled) { location.assign("/login"); throw new Error("Sign in to continue."); }
-  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Magentic Developer to sign in again." : result.error ?? "Request failed.");
+  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Agentick Developer to sign in again." : result.error ?? "Request failed.");
   return result;
 }
 
@@ -391,7 +391,7 @@ function setHeading(page: Page): void {
   node("#crumbs").innerHTML = page.crumbs ? page.crumbs.map(([label, href]) => `<a href="${escape(href)}">${escape(label)}</a> / `).join("") : "";
   node("#page-actions").innerHTML = page.actions ?? "";
   node("#breadcrumb").textContent = page.crumbs ? `${page.crumbs.map(([label]) => label).join(" / ")} / ${page.title}` : page.title;
-  document.title = `${page.title} · Magentic`;
+  document.title = `${page.title} · Agentick`;
 }
 
 function renderLegacy(): void {
@@ -758,7 +758,7 @@ async function sendChat(retry = false): Promise<void> {
     state.messages.push({ role: "user", content: text });
     state.draft = "";
   }
-  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Magentic…";
+  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Agentick…";
   const controller = new AbortController();
   chatController = controller;
   renderChat();

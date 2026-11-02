@@ -63,7 +63,7 @@ export function workspaceDirectory(directory: string, store: WorkspaceStore, ini
     // than reported as "invalid"; nothing is migrated or rewritten.
     const envelope = z.object({ version: z.number().int() }).safeParse(parsed);
     if (envelope.success && envelope.data.version !== 1) {
-      throw new StorageError(`This data folder was saved by a newer Magentic (directory version ${envelope.data.version}; this build reads version 1). Update the application, or choose another data folder.`);
+      throw new StorageError(`This data folder was saved by a newer Agentick (directory version ${envelope.data.version}; this build reads version 1). Update the application, or choose another data folder.`);
     }
     try { data = directorySchema.parse(parsed); }
     catch (error) { throw new StorageError("workspaces.json is invalid. The file was left untouched.", { cause: error }); }
@@ -76,7 +76,7 @@ export function workspaceDirectory(directory: string, store: WorkspaceStore, ini
       throw new StorageError("workspaces.json contains inconsistent workspace references.");
     }
     for (const id of ids) {
-      if (!store.read(id)) throw new StorageError(`Workspace ${id} is missing. Restore its file before opening Magentic.`);
+      if (!store.read(id)) throw new StorageError(`Workspace ${id} is missing. Restore its file before opening Agentick.`);
     }
   } else {
     if (!store.read(initial)) store.commit(initial, { config: structuredClone(DEFAULT_PIPELINE), version: 1, runs: [] });

@@ -1,13 +1,13 @@
 /*
- * Magentic design tokens
+ * Agentick design tokens
  *
  * Dark is the base and light is a real second theme, not an afterthought.
  * Both are declared here so a surface never has to invent a value.
  *
  * Three rules this file cannot enforce but the system depends on:
- *   1. Magenta is reserved. It marks the one primary action, the focus ring,
- *      and nothing else. A panel is never magenta and a heading is never
- *      magenta.
+ *   1. Green is reserved. It marks the one primary action, the focus ring,
+ *      and nothing else. A panel is never green and a heading is never
+ *      green.
  *   2. Depth is a lighter surface plus a hairline. Shadow appears only when
  *      something genuinely left the page, which means an overlay.
  *   3. Hierarchy comes from scale and weight. Uppercase is rare enough that
@@ -15,17 +15,17 @@
  */
 
 :root {
-  /* Signal magenta, the house colour. 400 on dark, 600 on light. */
-  --mg-50:  #FDEBF6;
-  --mg-100: #FBD2EA;
-  --mg-200: #F7A9D5;
-  --mg-300: #F177BC;
-  --mg-400: #E84BA3;
-  --mg-500: #D42E8B;
-  --mg-600: #B22273;
-  --mg-700: #8E1B5C;
-  --mg-800: #6B1445;
-  --mg-900: #470D2E;
+  /* Signal green, the house colour. 400 on dark, 600 on light. */
+  --mg-50:  #ebf9f0;
+  --mg-100: #cdf4dc;
+  --mg-200: #98edb6;
+  --mg-300: #3be477;
+  --mg-400: #1ed760;
+  --mg-500: #18ab4c;
+  --mg-600: #17613e;
+  --mg-700: #124c31;
+  --mg-800: #113a27;
+  --mg-900: #10291c;
 
   /* Type */
   --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -77,25 +77,25 @@
 
 :root,
 :root[data-theme="dark"] {
-  --bg:         #0A0610;
-  --surface-1:  #130D1C;
-  --surface-2:  #1B1327;
-  --surface-3:  #251B35;
+  --bg:         #101010;
+  --surface-1:  #181818;
+  --surface-2:  #242424;
+  --surface-3:  #303030;
 
-  --line:        #2C2140;
-  --line-strong: #3E2F58;
+  --line:        #303030;
+  --line-strong: #404040;
 
-  --text:   #F2EDF8;
-  --text-2: #B0A4C4;
-  --text-3: #8B7DA3;
+  --text:   #f3f5f3;
+  --text-2: #b8bdb9;
+  --text-3: #a0a8a2;
 
   --accent:      var(--mg-400);
   --accent-hover: var(--mg-300);
   --accent-press: var(--mg-500);
-  --accent-weak: rgba(232, 75, 163, 0.12);
-  /* Dark ink on magenta, never white: white on #E84BA3 is 3.5:1 and fails. */
-  --on-accent:   #12060E;
-  --focus-ring:  rgba(232, 75, 163, 0.22);
+  --accent-weak: rgba(30, 215, 96, 0.12);
+  /* Dark ink keeps button labels readable on bright green. */
+  --on-accent:   #07120b;
+  --focus-ring:  rgba(30, 215, 96, 0.22);
 
   --lineage: #A87BFF;
   --live:    #34E0B0;
@@ -125,9 +125,9 @@
     --accent:      var(--mg-600);
     --accent-hover: var(--mg-700);
     --accent-press: var(--mg-800);
-    --accent-weak: rgba(178, 34, 115, 0.08);
+    --accent-weak: rgba(23, 97, 62, 0.08);
     --on-accent:   #FFFFFF;
-    --focus-ring:  rgba(178, 34, 115, 0.2);
+    --focus-ring:  rgba(23, 97, 62, 0.2);
 
     --lineage: #6D34D6;
     --live:    #0C8F70;
@@ -154,9 +154,9 @@
   --accent:      var(--mg-600);
   --accent-hover: var(--mg-700);
   --accent-press: var(--mg-800);
-  --accent-weak: rgba(178, 34, 115, 0.08);
+  --accent-weak: rgba(23, 97, 62, 0.08);
   --on-accent:   #FFFFFF;
-  --focus-ring:  rgba(178, 34, 115, 0.2);
+  --focus-ring:  rgba(23, 97, 62, 0.2);
 
   --lineage: #6D34D6;
   --live:    #0C8F70;

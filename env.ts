@@ -2,7 +2,7 @@
  * Settings this server owns, read through one function.
  *
  * The server used to be called LNKZ MCP and its settings were named LNKZ_*.
- * It is Magentic now, so the settings are MAGENTIC_*. A deployment configured
+ * The deployed setting names use MAGENTIC_*. A deployment configured
  * before the rename still works: every renamed setting keeps its old name as a
  * fallback, and using the old name prints one warning naming the replacement.
  *
@@ -36,7 +36,7 @@ const RENAMED: Readonly<Record<string, string>> = {
 const warned = new Set<string>();
 
 /**
- * Reads one Magentic setting, falling back to its pre-rename LNKZ name.
+ * Reads one Agentick setting, falling back to its pre-rename LNKZ name.
  *
  * The new name wins whenever it is set, so a deployment can adopt the new
  * names one at a time without the old ones fighting back.

@@ -1,1 +1,1 @@
-https://magentic-presentation.vercel.app
+https://agentick-presentation.vercel.app

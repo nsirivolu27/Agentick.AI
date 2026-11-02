@@ -2,7 +2,7 @@ import { startCompanyWorkbench } from "./company-server.js";
 
 try {
   const app = await startCompanyWorkbench();
-  console.log(`Magentic company portal: ${app.url}`);
+  console.log(`Agentick company portal: ${app.url}`);
   let closing = false;
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => {
     if (closing) return;

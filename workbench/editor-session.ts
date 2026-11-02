@@ -91,7 +91,7 @@ export function editorModelUrl(configured: string): string {
 }
 
 export function editorOllamaModel(model: string, fetcher: typeof fetch = fetch, modelUrl = DEFAULT_MODEL_URL): AgentModel {
-  if (!model.trim() || model.length > 200) throw new Error("Choose an installed Ollama model in Magentic settings.");
+  if (!model.trim() || model.length > 200) throw new Error("Choose an installed Ollama model in Agentick settings.");
   const url = editorModelUrl(modelUrl);
   const where = new URL(url).host;
   return { async invoke(prompt, options) {
@@ -102,9 +102,9 @@ export function editorOllamaModel(model: string, fetcher: typeof fetch = fetch, 
         body: JSON.stringify({ model, stream: false, format: "json", messages: [{ role: "user", content: prompt }], options: { temperature: 0.1, num_predict: 4096 } }) });
     } catch (error) {
       if (options?.signal.aborted) throw error;
-      throw new Error(`Cannot reach the model service at ${where}. Start Ollama (or the gateway named in magentic.modelUrl) and install the model selected in Magentic settings.`);
+      throw new Error(`Cannot reach the model service at ${where}. Start Ollama (or the gateway named in magentic.modelUrl) and install the model selected in Agentick settings.`);
     }
-    if (!response.ok) throw new Error(response.status === 404 ? `Model '${model}' is unavailable at ${where}. Install it or change Magentic's model setting.` : `The model service at ${where} returned HTTP ${response.status}.`);
+    if (!response.ok) throw new Error(response.status === 404 ? `Model '${model}' is unavailable at ${where}. Install it or change Agentick's model setting.` : `The model service at ${where} returned HTTP ${response.status}.`);
     const data: unknown = await response.json();
     const result = z.object({ message: z.object({ content: z.string().max(200_000) }) }).parse(data);
     const usage = usageOf(data);

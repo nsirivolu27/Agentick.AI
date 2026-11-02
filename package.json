@@ -1,7 +1,7 @@
 {
   "name": "magentic-mcp",
   "version": "0.2.0",
-  "description": "Magentic: the Model Context Protocol server for the LNKZ conversation relay.",
+  "description": "Agentick: the Model Context Protocol server for the LNKZ conversation relay.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.26.1",

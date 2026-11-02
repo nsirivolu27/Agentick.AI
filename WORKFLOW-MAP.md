@@ -8,9 +8,9 @@ This map also defines a future Jira automation agent inside the workflow system.
 It is not a request to file a Jira issue. See
 [architecture and verification](workbench/ARCHITECTURE.md) for the current build
 and test workflow. Desktop packaging is deferred until the backend layers mature.
-Repository: nsirivolu27/Magentic.AI.
+Repository: nsirivolu27/Agentick.AI.
 
-Magentic is an open-source development workflow automation platform. Agents
+Agentick is an open-source development workflow automation platform. Agents
 perform stages of work; configurables expose the controls that steer their
 LLM use, tool access, context, handoffs, and execution limits. The portal and
 standalone MCP clients should use the same permitted integration capabilities.
@@ -36,7 +36,7 @@ provider usage accounting and independent reviewer enrollment are not yet
 implemented. The Jira responsibilities and acceptance criteria below remain a
 target architecture, not a claim that those integrations are live.
 
-Magentic owns its local workflow configuration, runs, stage evidence and bot
+Agentick owns its local workflow configuration, runs, stage evidence and bot
 attempts. LNKZ continues to own relay credentials, conversation storage and
 external connectors behind its REST API. The workspace store does not replace
 the relay's conversation store. No bot output counts as a human approval.
@@ -76,7 +76,7 @@ budgets, retries, and human checkpoints. Existing automation permissions govern
 routine updates; configured gates govern actions requiring review.
 
 The same permitted Jira MCP capabilities should also be available to standalone
-clients. A standalone client does not need to run the complete Magentic pipeline.
+clients. A standalone client does not need to run the complete Agentick pipeline.
 This is a planned interface, not a claim that the current three workspace MCP
 tools already create or modify Jira issues.
 
@@ -130,7 +130,7 @@ plus Jira automation that can be reused through standalone MCP.
 
 - Define and validate pipeline stages, handoff contracts, human gates, and
   configurable model/tool/usage controls using the mapping above.
-- Map Magentic workflow events to a chosen Jira project's fields and valid
+- Map Agentick workflow events to a chosen Jira project's fields and valid
   transitions; do not assume universal status names.
 - Define the Jira agent as a configurable pipeline participant with explicit
   inputs, outputs, handoffs, tool permissions, and observable execution.

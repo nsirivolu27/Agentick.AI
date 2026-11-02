@@ -167,7 +167,7 @@ server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("The local server has no TCP address.");
   const url = `http://127.0.0.1:${address.port}/`;
-  console.log(`Magentic Developer: ${url} (sample data only)`);
+  console.log(`Agentick Developer: ${url} (sample data only)`);
   if (desktop) process.send!({ url });
 });
 if (desktop) process.once("disconnect", () => {

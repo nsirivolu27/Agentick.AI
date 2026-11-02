@@ -30,7 +30,7 @@ export function marketplacePage(snapshot: WorkbenchSnapshot, id: string | undefi
       const projects = studio.projects.filter((project) => project.recipeId === recipe.id && project.status === "active");
       return `<article class="employee-card"><div class="employee-card-heading"><span class="marketplace-category">${escape(CATEGORIES[recipe.id] ?? "General")}</span>${projects.length ? status("neutral", `${projects.length} in workspace`) : '<small class="text-3">Included</small>'}</div><h2>${escape(recipe.title)}</h2><p>${escape(recipe.purpose)}</p><a class="employee-card-link" href="#/marketplace/${recipe.id}">View configurable →</a></article>`;
     }).join("")}</div>` : empty("No matching configurables.", { label: "Clear filters", href: "#/marketplace" });
-    return { title: "Configurable marketplace", context: "Ready-made assistant behavior for your team's work.", body: `${filters}${cards}<p class="text-3">Included with Magentic · Workspace approval rules still apply.</p>` };
+    return { title: "Configurable marketplace", context: "Ready-made assistant behavior for your team's work.", body: `${filters}${cards}<p class="text-3">Included with Agentick · Workspace approval rules still apply.</p>` };
   }
   const recipe = studio.recipes.find((item) => item.id === id);
   if (!recipe) return { title: "Configurable not found", crumbs, body: empty("This configurable is not available here.", { label: "Browse configurables", href: "#/marketplace" }) };

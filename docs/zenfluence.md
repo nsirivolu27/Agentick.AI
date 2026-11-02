@@ -1,6 +1,6 @@
 # Zenfluence
 
-Zenfluence is the company's Jira + Confluence workspace in Magentic. Open
+Zenfluence is the company's Jira + Confluence workspace in Agentick. Open
 `#/zenfluence`, read a ticket or page, then attach a reviewed snapshot to an
 open workflow. Jira ticket creation, comments and transitions remain in the
 existing Jira action layer; this connector performs no Atlassian writes.
@@ -17,7 +17,7 @@ This first adapter supports Atlassian Cloud site URLs and email/basic API-token
 authentication for tokens that support site-based REST access. OAuth and scoped
 API tokens requiring the api.atlassian.com gateway are not implemented. Use a
 dedicated service account limited to the company project and space. Every member
-of this Magentic workspace can read those configured sources using that account;
+of this Agentick workspace can read those configured sources using that account;
 this is shared company access, not each member's individual Atlassian permissions.
 
 No credentials, account or Confluence space are created automatically. An empty

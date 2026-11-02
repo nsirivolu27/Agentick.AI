@@ -37,7 +37,7 @@ test("first run: data saved by a newer application is refused with a clear reaso
   const path = join(dir, "workspaces.json");
   const newer = JSON.stringify({ version: 2, lastWorkspaceId: "workspace", mcpWorkspaceId: "workspace", workspaces: [] });
   await writeFile(path, newer);
-  assert.throws(() => workspaceDirectory(dir, fileWorkspaceStore(dir), "workspace"), /newer Magentic.*version 2.*reads version 1/);
+  assert.throws(() => workspaceDirectory(dir, fileWorkspaceStore(dir), "workspace"), /newer Agentick.*version 2.*reads version 1/);
   const { readFile } = await import("node:fs/promises");
   assert.equal(await readFile(path, "utf8"), newer);
 });

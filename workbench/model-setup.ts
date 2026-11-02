@@ -15,7 +15,7 @@ export function modelSetupNotice(selected: ChatModelOption): ModelSetupNotice {
   if (selected.local) {
     return {
       tone: "warn", title: "Ollama is not running",
-      body: "Magentic looks for Ollama on this computer at 127.0.0.1:11434 (or the address in MAGENTIC_LLM_BASE_URL). Nothing leaves the machine until a model answers.",
+      body: "Agentick looks for Ollama on this computer at 127.0.0.1:11434 (or the address in MAGENTIC_LLM_BASE_URL). Nothing leaves the machine until a model answers.",
       steps: [
         `Install Ollama from <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">ollama.com/download</a> and start it.`,
         `In a terminal run <code>ollama pull ${escape(selected.id)}</code> to install the model.`,

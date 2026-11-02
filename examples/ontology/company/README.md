@@ -6,7 +6,7 @@ Design and synthetic seed data for a future Palantir Foundry environment. No Fou
 
 Company owns Workflows and Agents. A Run links to its Company, Workflow and Agent. Evidence and Approval link to their Company and Run. IDs are immutable; names are labels. Each non-company row carries companyId for lineage and validation, not authorization.
 
-The CSV files contain one synthetic example each. The approval is pending, the agent is a draft, and hashes are explicitly unverified placeholders. Never use these records as release evidence. Magentic remains authoritative for membership, content hashes, signatures and release gates; importing an Approval object cannot approve a release.
+The CSV files contain one synthetic example each. The approval is pending, the agent is a draft, and hashes are explicitly unverified placeholders. Never use these records as release evidence. Agentick remains authoritative for membership, content hashes, signatures and release gates; importing an Approval object cannot approve a release.
 
 ## Ingest locally today
 
@@ -18,7 +18,7 @@ The CSV files contain one synthetic example each. The approval is pending, the a
 2. In Ontology Manager, create the six object types from blueprint.json. Map their backing datasets, primary keys and property types. The timestamp on an undecided Approval is nullable.
 3. Create each many-to-one link using the listed foreignKey and the target object's primaryKey. Use the exact API names from the blueprint. Check that every link stays within the same company.
 4. Apply Foundry dataset/object permissions and use an identity restricted to this company's permitted data. A companyId property or a client-side filter does not provide tenant isolation. If an ontology contains multiple companies, use company-restricted permissions or separate backing data/identities before enabling it here.
-5. Copy connection.example.json to private operator configuration. Replace the workspace ID with the ID returned by Magentic's company setup, the Foundry origin with your environment, and ontology with its real RID/API name. Keep only the properties and links agents need.
+5. Copy connection.example.json to private operator configuration. Replace the workspace ID with the ID returned by Agentick's company setup, the Foundry origin with your environment, and ontology with its real RID/API name. Keep only the properties and links agents need.
 6. Put the scoped bearer token in MAGENTIC_FOUNDRY_TOKEN_COMPANY on the server. Set MAGENTIC_ONTOLOGY_FILE to the private configuration path, then restart company:workbench. Do not put tokens in JSON or commit them. Credentials belong to the server operator; ordinary members cannot choose an endpoint or token.
 7. Sign in as a company member. Read one object through the Ontology reference form or the workspace MCP tools. Verify its source and company before attaching it to a work item. Test a second company and confirm the first company's connection is unavailable.
 

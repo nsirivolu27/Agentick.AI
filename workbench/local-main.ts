@@ -23,11 +23,11 @@ try {
   // Startup failures are the ones a person actually hits: a second instance,
   // a corrupt document, an unwritable data directory. Say which, and exit
   // non-zero so the launcher can show it rather than opening a blank window.
-  console.error(`Magentic could not start: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`Agentick could not start: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }
 
-console.log(`Magentic Developer: ${workbench.url} (local workspace ${workbench.workspaceId})`);
+console.log(`Agentick Developer: ${workbench.url} (local workspace ${workbench.workspaceId})`);
 if (desktop) process.send!({ url: workbench.url });
 
 let closing = false;

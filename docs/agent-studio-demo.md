@@ -1,6 +1,6 @@
 # Agent Studio demo
 
-From the Magentic checkout:
+From the Agentick checkout:
 
 ```sh
 corepack pnpm build:workbench

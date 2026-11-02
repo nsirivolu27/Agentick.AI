@@ -2,7 +2,7 @@
 
 ## First usable workflow
 
-An employee asks a question. Magentic finds documents they can access, identifies
+An employee asks a question. Agentick finds documents they can access, identifies
 the applicable version, drafts an answer with citations, and escalates gaps to
 the documentation owner. The current slice accepts attached excerpts and passes
 them through staged agents. Source retrieval and answer-quality evaluation still

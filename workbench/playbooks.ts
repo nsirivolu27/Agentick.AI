@@ -28,7 +28,7 @@ export const DEVELOPMENT_PLAYBOOKS: readonly DevelopmentPlaybook[] = [
     title: "Build an offline-friendly field workflow",
     outcome: "Let a field user capture and review a work item on the selected device platforms, including interrupted connectivity.",
     acceptance: ["Choose the target platforms and supported devices.", "Specify permissions, accessibility and offline behavior.", "Verify persistence, reconnect behavior and duplicate prevention.", "Record device or emulator results; distinguish tested from untested platforms."],
-    context: "Choose the application's stack, such as Kotlin, Swift or a cross-platform framework. Magentic coordinates the repository's own build tools.",
+    context: "Choose the application's stack, such as Kotlin, Swift or a cross-platform framework. Agentick coordinates the repository's own build tools.",
   },
   {
     id: "data-ai", name: "Data & AI prototype", category: "DATA & RESEARCH",

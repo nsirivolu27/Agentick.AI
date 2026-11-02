@@ -1,6 +1,6 @@
 # Workforce agent catalogue — Accenture-inspired
 
-This is an illustrative public capability map plus proposed reusable agents. It is not Accenture's internal reporting chart, a complete subsidiary/employee inventory, or an endorsed product. Public business labels are sourced; all agent roles and their assignments are Magentic design proposals.
+This is an illustrative public capability map plus proposed reusable agents. It is not Accenture's internal reporting chart, a complete subsidiary/employee inventory, or an endorsed product. Public business labels are sourced; all agent roles and their assignments are Agentick design proposals.
 
 ## Explore
 
@@ -11,7 +11,7 @@ The company has multiple independent dimensions: capabilities, industries and ge
 ## Use a base agent
 
 1. Choose a role and download its definition, or open the matching file in `agents/`.
-2. In Magentic Agent Studio, use **Import an agent** and paste that single JSON definition. Do not paste the full catalogue envelope.
+2. In Agentick Agent Studio, use **Import an agent** and paste that single JSON definition. Do not paste the full catalogue envelope.
 3. Choose an actually connected model; `select-connected-model` is a placeholder, never a working provider.
 4. Attach an authorized repository containing the relevant source exports. Set the client/workspace and data classification before supplying documents. Imported agents cannot fetch enterprise sources.
 5. Review tools and limits. Required source reading is enabled. A read proves access, not answer correctness. Validator roles also need a configured validation command.
