@@ -19,7 +19,8 @@ import { createWorkbenchServer } from "./server.js";
 import { createLocalSession, loadMcpToken, sameSecret, type LocalSession } from "./local-session.js";
 import { chatConfiguration } from "./chat-config.js";
 import { workspaceDirectory } from "./workspace-directory.js";
-import { filePipelines, PipelineError, type PipelineEngine } from "./pipeline.js";
+import { declarationEvidence } from "./declaration-sample.js";
+import { filePipelines, pipelineCommandSchema, PipelineError, type PipelineEngine } from "./pipeline.js";
 import { createBotRuntime, type BotRuntime } from "./bot-runtime.js";
 import { createAgentTests } from "./agent-tests.js";
 import { fileWorkspaceStore, workspacesDirectory, type WorkspaceStore } from "./storage.js";
@@ -192,9 +193,17 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     const pipelines: PipelineEngine = {
       snapshot: engine.snapshot,
       draft: engine.draft,
-      execute(workspace, actor, roles, raw, approvals) {
+      async start(workspace, actor, roles, raw, approvals) {
+        if (!roles.includes("admin") && !roles.includes("author")) throw new PipelineError(403, "An author or admin must start a run.");
+        const input = pipelineCommandSchema.parse(raw);
+        if (input.action !== "start") throw new PipelineError(400, "Expected a start command.");
+        const replay = engine.snapshot(workspace).runs.some(run => run.requestId === input.requestId);
+        const source = replay ? undefined : await declarationEvidence(input.materials ?? [], ontology(workspace));
+        return pipelines.execute(workspace, actor, roles, input, approvals, source);
+      },
+      execute(workspace, actor, roles, raw, approvals, workflowSource) {
         if (runtime.busy(workspace)) throw new PipelineError(409, "A bot is working in this workspace. Stop it before changing the pipeline.");
-        return engine.execute(workspace, actor, roles, raw, approvals);
+        return engine.execute(workspace, actor, roles, raw, approvals, workflowSource);
       },
     };
     jira = createJiraRuntime(pipelines, workspaceStore, options.jiraDelivery);

@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
-import { materialsSchema, type Material } from "./materials.js";
+import { isDeclarationMaterial, materialsSchema, type Material } from "./materials.js";
 import { agentConfigurableSchema, configurableStages } from "./agent-configurables.js";
 import { botPolicySchema } from "./bot-schema.js";
 import type { Role } from "../registry/roles.js";
@@ -58,7 +58,7 @@ export interface PipelineRun {
   id: string; requestId: string; workspaceId: string; owner: string; title: string; brief: string; issueKey: string | null;
   config: PipelineConfig; version: number; revision: number; requiredApprovals: number; createdAt: string; updatedAt: string;
   status: "running" | "paused" | "blocked" | "complete" | "cancelled"; current: number; stages: StageRun[];
-  events: PipelineEvent[]; jira: JiraPreview[]; materials?: Material[];
+  events: PipelineEvent[]; jira: JiraPreview[]; materials?: Material[]; workflowSource?: Material;
 }
 /** Where this workspace's state lives. "file" means it survives a restart. */
 export type StorageMode = "memory" | "file";
@@ -75,7 +75,8 @@ export interface PipelineGuards { assistant?(workspace: string, assistantId: str
 export interface DraftInput { runId: string; stageId: string; expectedRevision: number; text: string; by: string; jobId: string }
 export interface PipelineEngine {
   snapshot(workspace: string): PipelineSnapshot;
-  execute(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number): PipelineSnapshot;
+  start?(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number): Promise<PipelineSnapshot>;
+  execute(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number, workflowSource?: Material): PipelineSnapshot;
   /** Attach an assistant's draft to the active stage of a running workflow. The stage stays active; only a person completes it. */
   draft(workspace: string, input: DraftInput): PipelineSnapshot;
 }
@@ -172,7 +173,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       if (persistence) { persistence.commit(workspace, { ...persistence.read(workspace), ...value }); workspaces.set(workspace, value); }
       return snapshot(workspace);
     },
-    execute(workspace, actor, roles, raw, requiredApprovals) {
+    execute(workspace, actor, roles, raw, requiredApprovals, workflowSource) {
       if (!roles.length) throw new PipelineError(403, "Workspace membership is required.");
       const input = pipelineCommandSchema.parse(raw);
       // A working copy. Every mutation below lands here, and the live state
@@ -213,6 +214,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
           }
           return publish();
         }
+        if (input.materials?.some(isDeclarationMaterial) && !workflowSource) throw new PipelineError(409, "OpenFEMA declaration runs require verified Foundry evidence.");
         if (input.expectedVersion !== undefined && input.expectedVersion !== value.version) throw new PipelineError(409, "Workflow changed. Refresh before starting.");
         if (input.configurableId) {
           if (input.expectedVersion === undefined) throw new PipelineError(400, "Agent runs require a workflow version.");
@@ -227,7 +229,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
         checkAssistants(workspace, value.config);
         const at = new Date().toISOString();
         const run: PipelineRun = { id: randomUUID(), requestId: input.requestId, workspaceId: workspace, owner: actor,
-          title: input.title, brief: input.brief, ...(input.materials ? { materials: structuredClone(input.materials) } : {}), issueKey: input.issueKey ?? null, config: structuredClone(value.config),
+          title: input.title, brief: input.brief, ...(workflowSource ? { workflowSource: structuredClone(workflowSource) } : {}), ...(input.materials ? { materials: structuredClone(input.materials) } : {}), issueKey: input.issueKey ?? null, config: structuredClone(value.config),
           version: value.version, revision: 1, requiredApprovals, createdAt: at, updatedAt: at, status: "running", current: 0,
           stages: value.config.stages.map((_, index) => ({ status: index ? "pending" : "active", output: "", outputHash: "", outputBy: "", approvals: [] })), events: [], jira: [] };
         const item = event(run, actor, "started", input.brief); jira(run, item, run.config.stages[0]!.jiraStatus);
@@ -250,7 +252,12 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       } else {
         if (!admin && (actor !== run.owner || !roles.includes("author"))) throw new PipelineError(403, "The run owner or an admin must perform this action.");
         if (input.action === "materials") {
-          // Closed runs were refused above; any open run may change its reference material.
+          // Every reviewer must see the same sources while signatures are being collected.
+          if (stage.status === "awaiting_review") throw new PipelineError(409, "The source material is under review. Finish this review or start a new run with the corrected evidence.");
+          const priorSample = (run.materials ?? []).filter(isDeclarationMaterial);
+          if (JSON.stringify(priorSample) !== JSON.stringify(input.materials.filter(isDeclarationMaterial))) {
+            throw new PipelineError(409, "Start a new run to verify a different declaration sample against Foundry.");
+          }
           run.materials = structuredClone(input.materials);
           event(run, actor, "materials", input.materials.length ? `Reference material: ${input.materials.map((item) => item.title).join(", ")}.` : "Reference material cleared.");
         } else if (input.action === "complete") {

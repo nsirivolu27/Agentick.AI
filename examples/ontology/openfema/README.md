@@ -6,8 +6,7 @@ per designated area. The blueprint maps that file to a `Declaration` object
 type linked to a `State` reference table, which is the shape a person would
 create in Foundry's Ontology Manager.
 
-Files in this folder are design and reference data only. No Foundry
-environment, dataset or connection is created by them.
+The bundled [Virginia snapshot](data/virginia-snapshot.json) contains five area records for one declaration. Its query and retrieval time are in the response metadata. The [Federal Spaces demo](../../../README.md) uses these exact bytes for a repeatable briefing; the blueprint and State table are inputs for a separate Foundry import.
 
 ## Download the excerpt
 

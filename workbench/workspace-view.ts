@@ -3,7 +3,7 @@ import type { Role } from "../registry/roles.js";
 import type { BotAttempt, BotSnapshot } from "./bot-schema.js";
 import type { PipelineRun, PipelineSnapshot } from "./pipeline.js";
 import type { SessionDraft } from "./playbooks.js";
-import type { Material } from "./materials.js";
+import { isDeclarationMaterial, type Material } from "./materials.js";
 import { outputReview, runNow } from "./output-review.js";
 import { status } from "./ui.js";
 
@@ -37,7 +37,11 @@ export function workProgress(run: PipelineRun, bots: BotSnapshot | undefined, ac
   } else if (owner && phase === run.current && ["paused", "blocked"].includes(run.status)) {
     action = `<button class="primary" data-pipeline-action="${run.status === "paused" ? "resume" : "retry"}">Resume this work</button>`;
   } else if (active && owner) {
-    if (!definition.bot || definition.bot.kind === "manual") action = "";
+    if (!definition.bot || definition.bot.kind === "manual") {
+      if (definition.approval && !definition.assistantId && !stage.draft && run.workflowSource && run.materials?.some(isDeclarationMaterial)) {
+        action = '<button class="primary" data-pipeline-action="prepare_declaration_brief">Prepare analyst brief</button>';
+      }
+    }
     else if (!bots?.project) action = '<p>Connect the repository you want this agent to work in.</p><button class="primary" data-work-setup>Connect repository</button>';
     else if (attempt && current && ["ready", "applied"].includes(attempt.status)) {
       if (attempt.handoff?.blockers.length) action = '<p class="form-error">Resolve the reported blockers with a revision before handing off.</p>';

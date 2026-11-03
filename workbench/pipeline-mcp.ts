@@ -1,3 +1,5 @@
+import type { OntologyReader } from "./ontology.js";
+import { materialsSchema } from "./materials.js";
 import { registerZenfluenceReads } from "./zenfluence-mcp.js";
 import type { ZenfluenceDirectory } from "./zenfluence.js";
 import { registerAutomationInspection } from "./automation-mcp.js";
@@ -18,18 +20,19 @@ import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import type { DocumentsEngine } from "./documents.js";
 
 export async function handlePipelineMcp(engine: PipelineEngine, workspace: string, actor: string, roles: readonly Role[],
-  approvals: number, request: IncomingMessage, response: ServerResponse, raw: unknown, bots?: BotRuntime, jira?: Pick<JiraRuntime, "inspect">, assistants?: AssistantDirectory, learning?: LearningEngine, documents?: DocumentsEngine, automations?: AutomationRuntime, zenfluence?: ZenfluenceDirectory): Promise<void> {
+  approvals: number, request: IncomingMessage, response: ServerResponse, raw: unknown, bots?: BotRuntime, jira?: Pick<JiraRuntime, "inspect">, assistants?: AssistantDirectory, learning?: LearningEngine, documents?: DocumentsEngine, automations?: AutomationRuntime, zenfluence?: ZenfluenceDirectory, ontology?: OntologyReader, approvalRefusal?: string): Promise<void> {
   const server = new McpServer({ name: "magentic-pipelines", version: "0.1.0" }, {
     instructions: bots ? "Track workflows and inspect bot timelines. Bot execution and file application require the local application session." : "Track manual development handoffs and Jira previews. These tools do not execute code, invoke LLMs, send Jira requests, merge, or deploy.",
   });
   const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
-  registerWorkspaceReads(server, workspace, engine, documents);
+  registerWorkspaceReads(server, workspace, engine, documents, ontology);
   if (automations) registerAutomationInspection(server, automations, workspace);
   if (zenfluence) registerZenfluenceReads(server, zenfluence, workspace);
   server.registerTool("start_pipeline_run", { description: "Start a manual development run. A repeated requestId reuses the same run. Jira actions remain previews.",
-    inputSchema: z.object({ requestId: z.string().uuid(), title: z.string().min(3).max(160), brief: z.string().min(1).max(4000), issueKey: z.string().optional() }).strict(),
+    inputSchema: z.object({ requestId: z.string().uuid(), title: z.string().min(3).max(160), brief: z.string().min(1).max(4000), issueKey: z.string().optional(), materials: materialsSchema.optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } }, async (input) => {
-    try { const snapshot = engine.execute(workspace, actor, roles, { ...input, action: "start" }, approvals);
+    try { const command = { ...input, action: "start" };
+      const snapshot = engine.start ? await engine.start(workspace, actor, roles, command, approvals) : engine.execute(workspace, actor, roles, command, approvals);
       return result(snapshot.runs.find(run => run.requestId === input.requestId));
     } catch (error) { return { ...result({ error: error instanceof Error ? error.message : "Run could not start." }), isError: true }; }
   });
@@ -37,6 +40,7 @@ export async function handlePipelineMcp(engine: PipelineEngine, workspace: strin
     inputSchema: z.object({ action: z.enum(["complete", "approve", "pause", "resume", "block", "retry", "cancel"]), runId: z.string().uuid(),
       expectedRevision: z.number().int().min(1), note: z.string().min(1).max(4000).optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false } }, async (input) => {
+    if (input.action === "approve" && approvalRefusal) return { ...result({ error: approvalRefusal }), isError: true };
     try { const snapshot = engine.execute(workspace, actor, roles, input, approvals); return result(snapshot.runs.find(run => run.id === input.runId)); }
     catch (error) { return { ...result({ error: error instanceof Error ? error.message : "Run could not update." }), isError: true }; }
   });

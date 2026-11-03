@@ -20,6 +20,8 @@
     "test:ui": "playwright test --config tests/operations-ui.config.mjs",
     "dev:workbench": "node ./workbench/dev.mjs",
     "demo:workbench": "node ./dist/workbench/demo.mjs",
+    "demo:openfema": "node ./dist/workbench/agent-demo.mjs --openfema",
+    "audit:verify": "node ./dist/workbench/audit-verify-main.mjs",
     "demo:agents": "node ./dist/workbench/agent-demo.mjs",
     "seed:state": "tsc -p tsconfig.test.json && node .testbuild/workspaces/seed-state.js",
     "build:desktop": "node ./workbench/desktop/build.mjs",

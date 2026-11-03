@@ -2,14 +2,19 @@ import { z } from "zod";
 
 export const materialSchema = z.object({
   id: z.string().uuid(), title: z.string().trim().min(1).max(120),
-  content: z.string().trim().max(6000),
+  content: z.string(),
   url: z.string().url().max(2000).refine(value => {
     try {
       const url = new URL(value);
       return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password;
     } catch { return false; }
   }, "Use an HTTP or HTTPS source without credentials.").optional(),
-}).strict().refine(value => Boolean(value.content || value.url), "Provide an excerpt or a source link.");
+}).strict().transform((value, context) => {
+  // A declaration citation hashes the exact snapshot, including its original line endings.
+  const content = isDeclarationMaterial(value) ? value.content : value.content.trim();
+  if (content.length > 6000) context.addIssue({ code: "custom", path: ["content"], message: "Reference text must fit in 6000 characters." });
+  return { ...value, content };
+}).refine(value => Boolean(value.content || value.url), "Provide an excerpt or a source link.");
 
 // A bounded snapshot keeps later source edits from changing an agent's inputs.
 export const materialsSchema = z.array(materialSchema).max(8).superRefine((items, context) => {
@@ -19,6 +24,14 @@ export const materialsSchema = z.array(materialSchema).max(8).superRefine((items
     context.addIssue({ code: "custom", message: "Reference excerpts must total at most 16000 characters." });
 });
 export type Material = z.infer<typeof materialSchema>;
+
+export function isDeclarationMaterial(material: { url?: string | undefined }): boolean {
+  if (!material.url) return false;
+  const url = new URL(material.url);
+  const path = url.pathname.replace(/\/$/, "");
+  return (url.origin === "https://catalog.data.gov" && path === "/dataset/disaster-declarations-summaries")
+    || (url.origin === "https://www.fema.gov" && path === "/api/open/v2/DisasterDeclarationsSummaries");
+}
 
 export const FEDERAL_SERVICE_STARTER = {
   title: "Build an accessible disaster declaration finder",

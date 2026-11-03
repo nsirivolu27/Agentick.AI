@@ -7,8 +7,11 @@ import type { ChatConfiguration } from "./chat.js";
 import { createWorkbenchServer } from "./server.js";
 import { createAgentDemo, DEMO_MEMBERS, DEMO_WORKSPACE, scriptedDemoChat } from "./agent-demo-fixture.js";
 
+import { createDeclarationDemo } from "./openfema-demo.js";
+
+const declarations = process.argv.includes("--openfema");
 const live = process.argv.includes("--live");
-if (process.argv.slice(2).some(arg => arg !== "--live")) throw new Error("Use --live for local Ollama, or no arguments for scripted responses.");
+if ((live && declarations) || process.argv.slice(2).some(arg => !["--live", "--openfema"].includes(arg))) throw new Error("Choose --openfema for the evidence workflow, --live for Ollama, or no arguments for the scripted SOP.");
 let chat: ChatConfiguration = scriptedDemoChat();
 if (live) {
   const base = new URL(setting("MAGENTIC_LLM_BASE_URL") ?? "http://127.0.0.1:11434");
@@ -29,7 +32,9 @@ const output = fileURLToPath(new URL("./", import.meta.url));
 const scratch = fileURLToPath(new URL("../../.testbuild/", import.meta.url));
 mkdirSync(scratch, { recursive: true });
 const directory = mkdtempSync(join(scratch, "agent-demo-"));
-const demo = await createAgentDemo(directory, chat);
+const demo = declarations
+  ? await createDeclarationDemo(readFileSync(join(output, "virginia-snapshot.json"), "utf8"))
+  : await createAgentDemo(directory, chat);
 const assets = new Map<string, { type: string; body: string | Buffer }>();
 const types: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
 for (const file of readdirSync(output)) {
@@ -38,7 +43,7 @@ for (const file of readdirSync(output)) {
   if (file === "index.html") {
     body = body.toString().replace(/<select id="identity">[\s\S]*?<\/select>/,
       `<select id="identity">${DEMO_MEMBERS.map((member, index) => `<option value="${member.actor}">${index ? `Reviewer ${index}` : "Operator"}</option>`).join("")}</select>`)
-      .replace("<body", `<body data-agent-demo="${live ? "live" : "scripted"}"`);
+      .replace("<body", `<body data-agent-demo="${declarations ? "openfema" : live ? "live" : "scripted"}"`);
   }
   assets.set(file === "index.html" ? "/" : `/${file}`, { body, type: types[extname(file)]! });
 }
@@ -57,12 +62,19 @@ async function close() {
   if (closing) return;
   closing = true;
   server.close(); server.closeAllConnections();
-  await demo.agentTests.close();
-  await demo.bots.close();
+  if ("bots" in demo) {
+    await demo.agentTests.close();
+    await demo.bots.close();
+  }
 }
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => { void close(); });
 process.on("message", message => { if ((message as { type?: string })?.type === "shutdown") void close().then(() => process.disconnect?.()); });
 server.listen(port, "127.0.0.1", () => {
+  if ("runId" in demo) {
+    console.log(`OpenFEMA work item: ${origin}/#/desk/${demo.runId}`);
+    console.log("Real public records · offline Foundry replay · rule-based analyst · demo reviewers");
+    return;
+  }
   console.log(`Agent Studio: ${origin}/#/agent-studio/${demo.agents[0]!.id}`);
   console.log(live ? "Live local Ollama · synthetic source documents" : "Scripted demo · no live model calls or token charges");
   console.log(`Disposable demo evidence: ${directory}`);
