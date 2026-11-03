@@ -1,43 +1,45 @@
-const one = document.getElementById("one");
-const five = document.getElementById("five");
-const approve = document.getElementById("approve");
-const restart = document.getElementById("restart");
-const decision = document.getElementById("decision");
-const finding = document.getElementById("finding");
-let reviews = 0;
-
-five.addEventListener("click", () => {
-  finding.textContent = "Check the numbers again. Every row carries declaration 3631.";
-  restart.disabled = false;
-});
-
-one.addEventListener("click", () => {
-  finding.textContent = "Supported. Five Virginia counties appear in the sample for declaration 3631. The sample alone cannot establish the full affected area.";
-  one.disabled = five.disabled = true;
-  approve.disabled = restart.disabled = false;
-  decision.textContent = "Awaiting two independent reviews of this wording.";
-  approve.focus();
-});
-
-approve.addEventListener("click", () => {
-  reviews += 1;
-  if (reviews === 1) {
-    decision.textContent = "1 of 2 approvals. The handoff is pending.";
-    approve.textContent = "Approve as Reviewer 2";
-  } else {
-    decision.textContent = "2 of 2 approvals. The receiving team can trace the approved brief to the five source rows.";
-    approve.textContent = "Handoff complete";
-    approve.disabled = true;
-    restart.focus();
+const el = id => document.getElementById(id);
+let approvals = 0;
+el("task").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (el("run").disabled) return;
+  el("run").disabled = true;
+  el("output").hidden = true;
+  el("status").textContent = "Reading the work item and checking its source records…";
+  try {
+    const params = new URLSearchParams({county: el("county").value.trim()});
+    const response = await fetch("/api/analyst?" + params, {cache:"no-store"});
+    if (!response.ok) throw new Error("Analyst unavailable");
+    const data = await response.json();
+    el("trace").replaceChildren();
+    for (const call of data.trace) {
+      const item = document.createElement("li");
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = call.tool;
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify({arguments: call.arguments, result: call.result}, null, 2);
+      details.append(summary, pre);
+      item.append(details);
+      el("trace").append(item);
+    }
+    el("brief").textContent = data.brief;
+    el("limit").textContent = data.limit;
+    el("status").textContent = data.trace.length + " MCP calls completed. Expand a call to inspect its inputs and result.";
+    approvals = 0;
+    el("approve").disabled = false;
+    el("approve").textContent = "Approve as Reviewer 1";
+    el("decision").textContent = "Awaiting review";
+    el("output").hidden = false;
+  } catch {
+    el("status").textContent = "The analyst could not complete the tool run. Try again.";
+  } finally {
+    el("run").disabled = false;
   }
 });
-
-restart.addEventListener("click", () => {
-  reviews = 0;
-  one.disabled = five.disabled = false;
-  approve.disabled = restart.disabled = true;
-  approve.textContent = "Approve as Reviewer 1";
-  finding.textContent = "Compare the declaration number on each row.";
-  decision.textContent = "Choose a supported claim to open review.";
-  five.focus();
+el("approve").addEventListener("click", () => {
+  approvals++;
+  el("decision").textContent = approvals === 1 ? "1 of 2 approvals · Pending" : "2 of 2 approvals · Handoff complete";
+  el("approve").textContent = approvals === 1 ? "Approve as Reviewer 2" : "Handoff complete";
+  el("approve").disabled = approvals === 2;
 });
