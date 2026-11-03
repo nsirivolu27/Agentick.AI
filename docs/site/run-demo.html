@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run the OpenFEMA demo · Agentick</title>
+<link rel="stylesheet" href="./presentation.css">
+<script defer src="./run-demo.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to briefing</a>
+<header class="bar"><div class="bar-inner"><a class="wordmark" href="./">Agentick</a><span class="label">Federal Spaces</span></div></header>
+<main id="main">
+<section aria-labelledby="title">
+  <span class="label accent">Browser demo / Public data</span>
+  <h1 id="title">Review a Virginia disaster briefing.</h1>
+  <p>Five OpenFEMA rows landed on your desk. Check the evidence, then play both reviewers to release a sample handoff. This exercise runs in your browser.</p>
+  <div class="split">
+    <div><span class="artifact-label">01 / Source records</span><h2>What do the rows establish?</h2>
+      <ul><li>Goochland (County) · Declaration 3631</li>
+<li>Caroline (County) · Declaration 3631</li>
+<li>Montgomery (County) · Declaration 3631</li>
+<li>York (County) · Declaration 3631</li>
+<li>Bedford (County) · Declaration 3631</li></ul>
+      <a class="text-link" href="https://github.com/nsirivolu27/Agentick.AI/blob/main/examples/ontology/openfema/data/virginia-snapshot.json">Inspect the saved OpenFEMA response ↗</a>
+    </div>
+    <div><span class="artifact-label">02 / Analyst brief</span><h3>Choose the claim you can support.</h3>
+      <div class="actions"><button class="btn" id="five">Five separate disasters</button><button class="btn" id="one">Five counties in one declaration</button></div>
+      <p id="finding" role="status">Compare the declaration number on each row.</p>
+    </div>
+  </div>
+  <div><span class="artifact-label">03 / Review and handoff</span>
+    <p id="decision" aria-live="polite">Choose a supported claim to open review.</p>
+    <div class="actions"><button class="btn primary" id="approve" disabled>Approve as Reviewer 1</button><button class="btn" id="restart" disabled>Start over</button></div>
+  </div>
+  <noscript><p>Enable JavaScript to try the reviewer controls, or follow the local walkthrough below.</p></noscript>
+  <p class="small">Reviewer actions here are simulated. To collect approvals and verify an exported audit file, <a href="https://github.com/nsirivolu27/Agentick.AI#run-it-locally">run the full demo locally</a>.</p>
+</section>
+</main>
+</body>
+</html>
