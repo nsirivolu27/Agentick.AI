@@ -41,7 +41,7 @@ retry a delivery whose upstream outcome is unknown.
 
 This utility covers workflow configuration, runs and their Jira/automation
 delivery records. It does **not** back up separate analyst jobs, company
-directory, model/test stores, ontology, billing, provider vaults or source
+directory, model/test stores, reviewed agent packages and installations, ontology, billing, provider vaults or source
 repositories. A complete service backup requires a quiesced snapshot of every
 configured durable store and its source corpus, plus a separately controlled
 secret-manager recovery procedure. Never include raw secrets in a shared
@@ -52,6 +52,10 @@ report or repository.
 Use authenticated read-only application checks and the existing relay health
 endpoint for their respective services. Health is not proof of provider
 authorization, Foundry mappings, billing or successful external delivery.
+The workbench's GET /api/health uses the current workspace membership check.
+It reports whether workflow state was readable and which runtimes are configured,
+without testing providers or exposing credentials and filesystem paths.
+Its response identifies the single-process writer boundary.
 Membership revocation, tenant boundaries, restart behavior, writer locks,
 idempotency and partial delivery are covered by repository tests; production
 credentials and real organization setup still require deployment-specific

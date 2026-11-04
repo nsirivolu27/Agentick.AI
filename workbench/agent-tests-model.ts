@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { qualityMetrics, qualityPolicySchema, qualityReviewSchema } from "./agent-quality.js";
 import { assertionResultSchema, testAssertionSchema } from "./agent-test-assertions.js";
 import { agentConfigurableSchema, type AgentConfigurable } from "./agent-configurables.js";
 import { tokenUsageSchema } from "./model-usage.js";
@@ -34,6 +35,7 @@ export const testCaseSchema = z.object({
   /** A file in the attached repository the agent is expected to read. Empty when the test needs no source. */
   source: z.string().trim().max(250),
   assertions: z.array(testAssertionSchema).max(20).optional(),
+  qualityPolicy: qualityPolicySchema.optional(),
   createdBy: z.string().min(1), createdAt: z.string(), updatedAt: z.string(),
 }).strict();
 export type AgentTestCase = z.infer<typeof testCaseSchema>;
@@ -46,6 +48,7 @@ export const testRunSchema = z.object({
   caseHash: z.string().length(12).optional(), suiteHash: z.string().length(12).optional(),
   assertions: z.array(testAssertionSchema).max(20).optional(),
   assertionResults: z.array(assertionResultSchema).max(20).optional(),
+  qualityPolicy: qualityPolicySchema.optional(),
   evidence: z.array(z.object({ path: z.string().max(250), content: z.string().max(30_000),
     sha256: z.string().regex(/^[a-f0-9]{64}$/), readAt: z.string() }).strict()).max(12).optional(),
   projectRoot: z.string().max(1000).optional(), evidenceCurrent: z.boolean().optional(),
@@ -64,7 +67,7 @@ export const testRunSchema = z.object({
   tokenUsage: tokenUsageSchema.nullable(),
   events: z.array(z.string().max(500)).max(60),
   /** A person's judgement of the answer. Independent of status: a finished execution can still fail review. */
-  review: z.object({ verdict: z.enum(["pass", "fail", "unsure"]), note: z.string().max(2000), by: z.string().min(1), at: z.string() }).strict().optional(),
+  review: z.object({ verdict: z.enum(["pass", "fail", "unsure"]), note: z.string().max(2000), by: z.string().min(1), at: z.string(), quality: qualityReviewSchema.optional() }).strict().optional(),
 }).strict();
 export type AgentTestRun = z.infer<typeof testRunSchema>;
 
@@ -73,11 +76,11 @@ export type AgentTestRun = z.infer<typeof testRunSchema>;
 export interface AgentTestsSnapshot { cases: AgentTestCase[]; runs: AgentTestRun[]; busy: boolean }
 
 export const agentTestCommandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("save_case"), id: z.string().uuid().optional(), agentId: z.string().uuid(), title: text(120), prompt: text(4000), expected: z.string().trim().max(2000).default(""), source: z.string().trim().max(250).default(""), assertions: z.array(testAssertionSchema).max(20).optional() }).strict(),
+  z.object({ action: z.literal("save_case"), id: z.string().uuid().optional(), agentId: z.string().uuid(), title: text(120), prompt: text(4000), expected: z.string().trim().max(2000).default(""), source: z.string().trim().max(250).default(""), assertions: z.array(testAssertionSchema).max(20).optional(), qualityPolicy: qualityPolicySchema.nullable().optional() }).strict(),
   z.object({ action: z.literal("delete_case"), caseId: z.string().uuid() }).strict(),
   /** expectedVersion is the workspace configuration version the person saw; a changed agent must be re-read before it is tested. */
   z.object({ action: z.literal("run"), caseId: z.string().uuid(), expectedVersion: z.number().int().min(1) }).strict(),
-  z.object({ action: z.literal("review"), runId: z.string().uuid(), verdict: z.enum(["pass", "fail", "unsure"]), note: z.string().trim().max(2000).default("") }).strict(),
+  z.object({ action: z.literal("review"), runId: z.string().uuid(), verdict: z.enum(["pass", "fail", "unsure"]), note: z.string().trim().max(2000).default(""), quality: qualityReviewSchema.optional() }).strict(),
 ]);
 
 
@@ -100,8 +103,8 @@ export function toolCallsFrom(events: readonly string[]): AgentTestRun["toolCall
  * True when a saved test succeeded against the agent exactly as it is now.
  * An edit changes the hash, so an old pass never vouches for a new version.
  */
-export function testCaseHash(value: Pick<AgentTestCase, "prompt" | "expected" | "source" | "assertions">): string {
-  return fingerprint(JSON.stringify({ prompt: value.prompt, expected: value.expected, source: value.source, assertions: value.assertions ?? [] }));
+export function testCaseHash(value: Pick<AgentTestCase, "prompt" | "expected" | "source" | "assertions" | "qualityPolicy">): string {
+  return fingerprint(JSON.stringify({ prompt: value.prompt, expected: value.expected, source: value.source, assertions: value.assertions ?? [], ...(value.qualityPolicy ? { qualityPolicy: value.qualityPolicy } : {}) }));
 }
 
 export function testSuiteHash(cases: readonly AgentTestCase[], agentId: string): string {
@@ -117,6 +120,6 @@ export function passedCurrentTest(agent: AgentConfigurable, tests: AgentTestsSna
       run.agentHash === current && run.caseHash === testCaseHash(item) && run.suiteHash === suite);
     return !!run && run.status === "succeeded" && run.review?.verdict === "pass" && run.evidenceCurrent === true &&
       (run.assertionResults?.length ?? 0) === (run.assertions?.length ?? 0) &&
-      (run.assertionResults ?? []).every(result => result.passed);
+      (run.assertionResults ?? []).every(result => result.passed) && qualityMetrics(run).meetsPolicy;
   });
 }

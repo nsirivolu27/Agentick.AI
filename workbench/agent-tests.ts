@@ -1,3 +1,5 @@
+import { createAgentPackages, type AgentPackages } from "./agent-packages.js";
+import { qualityMetrics } from "./agent-quality.js";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -30,6 +32,7 @@ const stateSchema = z.object({ version: z.literal(1), workspaceId: z.string().mi
 type State = z.infer<typeof stateSchema>;
 
 export interface AgentTestsEngine {
+  packages: AgentPackages;
   snapshot(workspace: string): AgentTestsSnapshot;
   execute(workspace: string, actor: string, roles: readonly Role[], raw: unknown): Promise<AgentTestsSnapshot>;
   /** Resolves when no test is running in the workspace. Tests wait on it; production code does not need it. */
@@ -40,7 +43,7 @@ export interface AgentTestsEngine {
 export interface AgentTestsOptions {
   /** Where each workspace's tests are kept. Omitted means memory only, which the scripted demo uses. */
   directory?: string;
-  pipelines: Pick<PipelineEngine, "snapshot">;
+  pipelines: Pick<PipelineEngine, "snapshot" | "execute">;
   bots: Pick<BotRuntime, "snapshot">;
   chat?: ChatConfiguration;
 }
@@ -183,6 +186,7 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
       if (!existing && value.cases.length >= MAX_CASES) throw new PipelineError(409, `A workspace keeps up to ${MAX_CASES} test cases. Delete one first.`);
       const saved = testCaseSchema.parse({ id: existing?.id ?? randomUUID(), workspaceId: workspace, agentId: agent.id, title: input.title, prompt: input.prompt, expected: input.expected, source: input.source,
         assertions: input.assertions ?? existing?.assertions ?? [],
+        qualityPolicy: input.qualityPolicy === null ? undefined : input.qualityPolicy ?? existing?.qualityPolicy,
         createdBy: existing?.createdBy ?? actor, createdAt: existing?.createdAt ?? at, updatedAt: at });
       value.cases = existing ? value.cases.map(item => item.id === saved.id ? saved : item) : [...value.cases, saved];
       save(value);
@@ -205,7 +209,12 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
         throw new PipelineError(409, "Failed execution or assertions cannot receive a passing quality review.");
       }
       if (run.review) throw new PipelineError(409, `${run.review.by} already reviewed this run. Run the test again for a fresh review.`);
-      run.review = { verdict: input.verdict, note: input.note, by: actor, at };
+      const review = { verdict: input.verdict, note: input.note, by: actor, at, ...(input.quality ? { quality: input.quality } : {}) };
+      if (run.qualityPolicy && actor === run.startedBy) throw new PermissionError("An independent reviewer must judge source-bound quality.");
+      if (input.verdict === "pass" && !qualityMetrics({ ...run, review }).meetsPolicy) {
+        throw new PipelineError(409, "Review every output line against frozen evidence and meet the saved quality thresholds.");
+      }
+      run.review = review;
       save(value);
       return snapshot(workspace);
     }
@@ -219,7 +228,15 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
     if (options.bots.snapshot(workspace).busy) throw new PipelineError(409, "A workflow agent is running. Wait for it to finish before testing.");
     const agent = agentOf(workspace, testCase.agentId);
     const { checkout } = await readiness(workspace, agent, testCase);
+    // Provider discovery yields. Recheck before reserving a worker so two
+    // simultaneous requests cannot both consume the workspace's budget.
+    if (closed || active.has(workspace) || options.bots.snapshot(workspace).busy) throw new PipelineError(409, "A test or workflow agent is already running, or the application is stopping.");
+    if (options.pipelines.snapshot(workspace).version !== input.expectedVersion ||
+      !value.cases.some(item => item.id === testCase.id && testCaseHash(item) === testCaseHash(testCase))) {
+      throw new PipelineError(409, "The agent or test changed during preparation. Refresh and run again.");
+    }
     const run = testRunSchema.parse({ id: randomUUID(), workspaceId: workspace, caseId: testCase.id, agentId: agent.id, agentHash: agentHash(agent), agentName: agent.name, model: agent.model,
+      qualityPolicy: testCase.qualityPolicy,
       caseHash: testCaseHash(testCase), suiteHash: testSuiteHash(value.cases, agent.id), evidence: [], projectRoot: checkout,
       assertions: [...(testCase.assertions ?? []), ...(testCase.source && !testCase.assertions?.some(rule => rule.kind === "source_read" && rule.value === testCase.source)
         ? [{ kind: "source_read" as const, value: testCase.source }] : [])],
@@ -233,6 +250,7 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
   }
 
   return {
+    packages: createAgentPackages({ directory: options.directory ? join(options.directory, "packages") : undefined, pipelines: options.pipelines, tests: snapshot }),
     snapshot, execute,
     settled: async (workspace) => { await active.get(workspace)?.done; },
     close: async () => {

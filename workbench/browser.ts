@@ -1,3 +1,4 @@
+import { agentPackagesPage } from "./agent-packages-view.js";
 import { createZenfluenceView } from "./zenfluence-controller.js";
 import type { SavedChat, SavedChatSummary } from "./chat-history.js";
 import { createWorkflowCanvas } from "./workflow-canvas-controller.js";
@@ -265,6 +266,13 @@ async function api(path: string, data?: unknown, workspace = selectedWorkspace):
     cache: "no-store",
   });
   const result = await response.json();
+  if (companyMode && response.status === 403 && path === "/api/workspace" && workspace === selectedWorkspace) {
+    ++refreshVersion;
+    chatController?.abort();
+    node("#records").textContent = "Workspace access changed. Choose an authorized company.";
+    location.assign("/companies");
+    throw new Error("Workspace membership could not be confirmed.");
+  }
   if (response.status === 401 && accountsEnabled) { location.assign("/login"); throw new Error("Sign in to continue."); }
   if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Agentick Developer to sign in again." : result.error ?? "Request failed.");
   return result;
@@ -367,7 +375,9 @@ function currentPage(): Page {
       if (accountScope !== selectedWorkspace + ":" + snapshot.actor) { accountSummary = undefined; accountError = undefined; accountScope = selectedWorkspace + ":" + snapshot.actor; void loadAccount(); }
       return accountPage(accountSummary, accountError);
     }
-    case "marketplace": return workforceMarketplacePage(snapshot, workspaceList?.workspaces.find(item => item.id === selectedWorkspace)?.name ?? snapshot.workspaceId, route.id, route.query.get("group") ?? undefined, route.query.get("q") ?? "", route.query.get("library") === "1");
+    case "marketplace":
+      if (route.query.get("collection") === "packages") return agentPackagesPage(snapshot, route.query.get("q") ?? "");
+      return workforceMarketplacePage(snapshot, workspaceList?.workspaces.find(item => item.id === selectedWorkspace)?.name ?? snapshot.workspaceId, route.id, route.query.get("group") ?? undefined, route.query.get("q") ?? "", route.query.get("library") === "1");
     case "agent-studio": return agentStudioPage(snapshot, route.id, route.query.get("preset"), agentModelScope === `${selectedWorkspace}:${snapshot.actor}` ? agentModels : [], studioUi,
       (["test", "workflow"].includes(route.sub ?? "") ? route.sub : "setup") as StudioSection, agentTestsScope === `${selectedWorkspace}:${snapshot.actor}` ? agentTests : undefined);
     case "workspace": return { title: "Work queue", context: "Your next actions.", actions: snapshot.canAuthor ? '<button class="primary" data-work-new>+ New work item</button>' : "", body: hint("Open a work item to inspect its record, evidence, and next step. No action is executed from this queue.") + homeView(snapshot) };
@@ -1082,7 +1092,7 @@ function readPipelineConfig(): PipelineConfig {
 }
 document.addEventListener("click", async event => {
   const link = (event.target as Element).closest<HTMLAnchorElement>(".audit-links a[download]");
-  if (!link || link.origin !== location.origin || link.pathname !== "/api/audit-package") return;
+  if (!link || link.origin !== location.origin || !["/api/audit-package", "/api/agent-package-export"].includes(link.pathname)) return;
   event.preventDefault();
   try {
     const response = await fetch(link.href, { headers: await requestHeaders() });
@@ -1715,7 +1725,10 @@ document.addEventListener("submit", async event => {
     if (kind === "case") {
       await api("/api/agent-tests", { action: "save_case", ...(form.dataset.case ? { id: form.dataset.case } : {}), agentId: form.dataset.agent,
         title: String(fields.get("title")), prompt: String(fields.get("prompt")), expected: String(fields.get("expected") ?? ""), source: String(fields.get("source") ?? ""),
-        assertions: JSON.parse(String(fields.get("assertions") ?? "[]") || "[]") });
+        assertions: JSON.parse(String(fields.get("assertions") ?? "[]") || "[]"),
+        qualityPolicy: fields.has("qualityEnabled") ? { minSupportedRate: Number(fields.get("supportRate")) / 100,
+          minCitationRate: Number(fields.get("citationRate")) / 100,
+          expectedTools: String(fields.get("expectedTools") ?? "").split(",").map(tool => tool.trim()).filter(Boolean) } : null });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       if (form.dataset.draft) delete studioUi.drafts[form.dataset.draft];
       notify(form.dataset.case ? "Test saved." : "Test saved. Run it to see the result.");
@@ -1726,7 +1739,13 @@ document.addEventListener("submit", async event => {
       studioUi.drafts[draftKey] = { ...studioUi.drafts[draftKey], runId: "" };
       notify("Test started. The result appears here when it finishes.");
     } else {
-      await api("/api/agent-tests", { action: "review", runId: form.dataset.run, verdict: String(fields.get("verdict")), note: String(fields.get("note") ?? "") });
+      const quality = form.querySelector("[data-quality-review]") ? { complete: fields.has("qualityComplete"),
+        claims: Array.from(form.querySelectorAll<HTMLElement>("[data-claim]")).map(element => {
+          const index = element.dataset.claim;
+          return { claim: String(fields.get(`claim-${index}`)), verdict: String(fields.get(`claim-verdict-${index}`)),
+            source: String(fields.get(`claim-source-${index}`) ?? ""), quote: String(fields.get(`claim-quote-${index}`) ?? "") };
+        }) } : undefined;
+      await api("/api/agent-tests", { action: "review", runId: form.dataset.run, verdict: String(fields.get("verdict")), note: String(fields.get("note") ?? ""), ...(quality ? { quality } : {}) });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       notify("Quality review recorded.");
     }
@@ -1915,4 +1934,42 @@ document.addEventListener("submit", async event => {
   } catch (error) {
     if (scope === `${selectedWorkspace}:${snapshot.actor}`) notify((error as Error).message, true);
   } finally { lock(false); }
+});
+
+async function packageCommand(command: unknown): Promise<void> {
+  if (busy) return;
+  const scope = selectedWorkspace + ":" + snapshot.actor;
+  lock(true);
+  try {
+    await api("/api/agent-packages", command);
+    if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
+    await refresh();
+    notify("Package updated.");
+  } catch (error) {
+    if (scope === selectedWorkspace + ":" + snapshot.actor) notify((error as Error).message, true);
+  } finally { lock(false); }
+}
+document.addEventListener("click", event => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-package-action]");
+  if (!button || button.disabled) return;
+  void packageCommand({ action: button.dataset.packageAction, packageId: button.dataset.package, expectedHash: button.dataset.hash });
+});
+document.addEventListener("submit", event => {
+  const form = event.target as HTMLFormElement;
+  if (form.id === "package-search") {
+    event.preventDefault();
+    navigate("#/marketplace?collection=packages&q=" + encodeURIComponent(String(new FormData(form).get("q") ?? "")));
+    return;
+  }
+  const action = form.dataset.packageForm;
+  if (!action) return;
+  event.preventDefault();
+  const fields = new FormData(form);
+  const version = Number(form.dataset.version);
+  try {
+    if (action === "publish") void packageCommand({ action, agentId: fields.get("agentId"), expectedVersion: version });
+    if (action === "assign") void packageCommand({ action, installationId: form.dataset.installation, stageId: fields.get("stageId"), expectedVersion: version });
+    if (action === "install") void packageCommand({ action, packageId: form.dataset.package, expectedHash: form.dataset.hash, upgradedFrom: fields.get("upgradedFrom") });
+    if (action === "import") void packageCommand({ action, expectedVersion: version, template: JSON.parse(String(fields.get("template"))) });
+  } catch { notify("Enter valid template JSON. Only a draft definition can be imported.", true); }
 });

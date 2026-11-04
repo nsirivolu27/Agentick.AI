@@ -171,6 +171,16 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       const { workspaceId, actor } = identity;
       const roles = await options.context.members!.rolesFor(workspaceId, actor);
       if (!roles.length) throw new PermissionError("You are not a member of this workspace.");
+      if (request.method === "GET" && path === "/api/health") {
+        const pipeline = options.pipelines?.snapshot(workspaceId);
+        send(response, 200, { status: "ok", workspaceId,
+          persistence: pipeline?.storage ?? "unconfigured", writerMode: "single-process",
+          capabilities: { workflows: !!pipeline, agentTests: !!options.agentTests,
+            agentPackages: !!options.agentTests, models: !!options.chat,
+            ontology: !!options.ontology?.(workspaceId), externalActions: !!options.jira || !!options.automations },
+          note: "Workflow state was readable. This does not verify upstream services, durable backups or multi-instance readiness." });
+        return;
+      }
       if (request.method === "GET" && path === "/api/zenfluence") {
         // The workspace id is included so an unconfigured page can show exactly
         // what to put in the connection file.
@@ -206,6 +216,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         const records = await options.context.store.list(workspaceId);
         send(response, 200, {
           ...(options.pipelines ? { pipelines: options.pipelines.snapshot(workspaceId) } : {}),
+          ...(options.agentTests ? { agentPackages: options.agentTests.packages.snapshot(workspaceId, (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals) } : {}),
           ...(options.analyst ? { analyst: options.analyst.snapshot(workspaceId) } : {}),
           ...(options.bots ? { bots: options.bots.snapshot(workspaceId) } : {}),
           ...(options.scheduler ? { schedule: options.scheduler.snapshot(workspaceId) } : {}),
@@ -240,6 +251,13 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       }
       if (path === "/api/agent-tests" && request.method === "GET" && options.agentTests) {
         send(response, 200, options.agentTests.snapshot(workspaceId)); return;
+      }
+      if (path === "/api/agent-package-export" && request.method === "GET" && options.agentTests) {
+        const id = z.string().uuid().parse(new URL(request.url!, "http://localhost").searchParams.get("id"));
+        const exported = options.agentTests.packages.exportPackage(workspaceId, id,
+          (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals);
+        response.setHeader("Content-Disposition", `attachment; filename="agent-package-${id}.json"`);
+        send(response, 200, exported); return;
       }
       if (path === "/api/audit-package" && request.method === "GET" && options.pipelines) {
         // One run's chain of custody as a file. Any member may read it; it only contains what the run page already shows.
@@ -394,6 +412,14 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       }
       if (path === "/api/bots" && options.bots) {
         send(response, 200, await options.bots.execute(workspaceId, actor, roles, raw, (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals));
+        return;
+      }
+      if (path === "/api/agent-packages") {
+        if (!options.agentTests) throw new RequestError(503, "Agent packages need the configured test and repository runtime. This deployment has not enabled it.");
+        if (identity.recentSignIn === false && (raw as { action?: unknown })?.action === "approve") throw new PermissionError("Sign in again before approving a package.");
+        const currentRoles = await options.context.members!.rolesFor(workspaceId, actor);
+        send(response, 200, options.agentTests.packages.execute(workspaceId, actor, currentRoles, raw,
+          (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals));
         return;
       }
       if (path === "/api/agent-tests" && options.agentTests) {

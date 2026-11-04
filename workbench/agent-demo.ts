@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setting } from "../env.js";
@@ -32,9 +33,9 @@ if (live) {
 const port = Number(setting("MAGENTIC_AGENT_DEMO_PORT") ?? "4183");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("MAGENTIC_AGENT_DEMO_PORT must be 1–65535.");
 const output = fileURLToPath(new URL("./", import.meta.url));
-const scratch = fileURLToPath(new URL("../../.testbuild/", import.meta.url));
-mkdirSync(scratch, { recursive: true });
-const directory = mkdtempSync(join(scratch, "agent-demo-"));
+// A nested source checkout can exceed Git's Windows metadata path limit.
+// The demo owns disposable repositories; company state keeps its configured path.
+const directory = mkdtempSync(join(tmpdir(), "agentick-demo-"));
 const saved = declarations ? analystPersistence(setting("AGENTICK_ANALYST_DIRECTORY") ?? fileURLToPath(new URL("../../.magentic-dev/openfema/", import.meta.url))) : undefined;
 const demo = declarations
   ? await createDeclarationDemo(readFileSync(join(output, "virginia-snapshot.json"), "utf8"), filePipelines(saved!.pipelines))
