@@ -24,15 +24,15 @@ export function registerWorkspaceReads(server: McpServer, workspace: string, eng
     description: "Check an attached OpenFEMA sample against the mapped Foundry Declaration objects. Return verified rows, counts and source references.",
     inputSchema: z.object({ runId: z.string().uuid(), materialId: z.string().uuid() }).strict(),
     annotations: { readOnlyHint: true },
-  }, async ({ runId, materialId }) => {
+  }, async ({ runId, materialId }, extra) => {
     const run = engine.snapshot(workspace).runs.find(item => item.id === runId);
     const material = run?.materials?.find(item => item.id === materialId);
     if (!material) return { ...result({ error: "Reference not found in this workspace run." }), isError: true };
     try {
-      const sample = await verifiedDeclarationSample(material, ontology);
+      const sample = await verifiedDeclarationSample(material, ontology, extra.signal);
       return result({ ...sample, brief: declarationBrief(sample) });
     }
-    catch (error) { return { ...result({ error: error instanceof Error ? error.message : "Invalid declaration snapshot." }), isError: true }; }
+    catch { return { ...result({ error: "Declaration evidence could not be verified. Check the scoped mapping and saved source." }), isError: true }; }
   });
   if (documents) server.registerTool("list_documents", {
     description: "List the documents in this workspace's documentation portal: title, size, how many lines looked like a credential, an excerpt, and the runs and datasets each one is connected to. The content stays on the machine.",

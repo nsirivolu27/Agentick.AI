@@ -39,7 +39,7 @@ import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import { DocumentError, type DocumentsEngine } from "./documents.js";
 import { StudioStorageError } from "./studio/store.js";
 
-import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit } from "./audit-package.js";
+import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit, type AuditActivity } from "./audit-package.js";
 import { randomUUID } from "node:crypto";
 import { declarationBrief, verifiedDeclarationSample } from "./declaration-sample.js";
 import { isDeclarationMaterial } from "./materials.js";
@@ -245,6 +245,19 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         // One run's chain of custody as a file. Any member may read it; it only contains what the run page already shows.
         const query = new URL(request.url!, "http://localhost").searchParams;
         const markdown = query.get("format") === "markdown";
+        const attempts = options.bots?.snapshot(workspaceId).attempts ?? [];
+        const analystJobs = options.analyst?.snapshot(workspaceId).jobs ?? [];
+        const activityForRun = (run: { id: string }): AuditActivity[] => [
+          ...attempts.filter(attempt => attempt.runId === run.id).map(attempt => ({
+            executionId: attempt.id, runId: run.id, kind: "worker" as const, status: attempt.status, model: attempt.model,
+            events: attempt.events, note: "Recorded worker log, bounded to the latest 50 events; not a claim of a complete provider transcript.",
+          })),
+          ...analystJobs.filter(job => job.runId === run.id).map(job => ({
+            executionId: job.id, runId: run.id, kind: "analyst" as const, status: job.status,
+            events: job.trace.map(trace => ({ at: trace.startedAt, message: `${trace.tool}: ${trace.outcome}. ${trace.reason} ${trace.summary}` })),
+            note: "Recorded source-tool trace; no language-model token usage is inferred.",
+          })),
+        ];
         const deliver = (name: string, text: string) => {
           response.writeHead(200, { "Content-Type": markdown ? "text/markdown; charset=utf-8" : "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${name}.${markdown ? "md" : "json"}"` });
@@ -252,12 +265,12 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         };
         if (query.get("scope") === "workspace") {
           // The whole workspace: every run's package plus the definition audit log, under one bundle hash.
-          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor });
+          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor, activityForRun });
           deliver(`workspace-audit-${workspaceId}`, markdown ? renderWorkspaceAudit(bundle) : JSON.stringify(bundle, null, 2)); return;
         }
         const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === query.get("run"));
         if (!run) throw new RequestError(404, "Run not found in this workspace.");
-        const pkg = buildAuditPackage(run, { workspaceId, actor });
+        const pkg = buildAuditPackage(run, { workspaceId, actor, activity: activityForRun(run) });
         deliver(`audit-package-${run.id}`, markdown ? renderAuditPackage(pkg) : JSON.stringify(pkg, null, 2)); return;
       }
       if ((path === "/api/chat/models" || path === "/api/agent-studio/models") && request.method === "GET") {

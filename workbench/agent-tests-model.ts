@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertionResultSchema, testAssertionSchema } from "./agent-test-assertions.js";
 import { agentConfigurableSchema, type AgentConfigurable } from "./agent-configurables.js";
 import { tokenUsageSchema } from "./model-usage.js";
 
@@ -32,6 +33,7 @@ export const testCaseSchema = z.object({
   expected: z.string().trim().max(2000),
   /** A file in the attached repository the agent is expected to read. Empty when the test needs no source. */
   source: z.string().trim().max(250),
+  assertions: z.array(testAssertionSchema).max(20).optional(),
   createdBy: z.string().min(1), createdAt: z.string(), updatedAt: z.string(),
 }).strict();
 export type AgentTestCase = z.infer<typeof testCaseSchema>;
@@ -41,6 +43,12 @@ export const testRunSchema = z.object({
   id: z.string().uuid(), workspaceId: z.string().min(1), caseId: z.string().uuid(), agentId: z.string().uuid(),
   /** The agent version this run exercised. A later edit makes the run out of date without erasing it. */
   agentHash: z.string().length(12), agentName: z.string(), model: z.string(),
+  caseHash: z.string().length(12).optional(), suiteHash: z.string().length(12).optional(),
+  assertions: z.array(testAssertionSchema).max(20).optional(),
+  assertionResults: z.array(assertionResultSchema).max(20).optional(),
+  evidence: z.array(z.object({ path: z.string().max(250), content: z.string().max(30_000),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/), readAt: z.string() }).strict()).max(12).optional(),
+  projectRoot: z.string().max(1000).optional(), evidenceCurrent: z.boolean().optional(),
   prompt: text(4000), expected: z.string().max(2000), source: z.string().max(250),
   startedBy: z.string().min(1), startedAt: z.string(), finishedAt: z.string().optional(),
   status: z.enum(TEST_RUN_STATUSES),
@@ -65,7 +73,7 @@ export type AgentTestRun = z.infer<typeof testRunSchema>;
 export interface AgentTestsSnapshot { cases: AgentTestCase[]; runs: AgentTestRun[]; busy: boolean }
 
 export const agentTestCommandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("save_case"), id: z.string().uuid().optional(), agentId: z.string().uuid(), title: text(120), prompt: text(4000), expected: z.string().trim().max(2000).default(""), source: z.string().trim().max(250).default("") }).strict(),
+  z.object({ action: z.literal("save_case"), id: z.string().uuid().optional(), agentId: z.string().uuid(), title: text(120), prompt: text(4000), expected: z.string().trim().max(2000).default(""), source: z.string().trim().max(250).default(""), assertions: z.array(testAssertionSchema).max(20).optional() }).strict(),
   z.object({ action: z.literal("delete_case"), caseId: z.string().uuid() }).strict(),
   /** expectedVersion is the workspace configuration version the person saw; a changed agent must be re-read before it is tested. */
   z.object({ action: z.literal("run"), caseId: z.string().uuid(), expectedVersion: z.number().int().min(1) }).strict(),
@@ -92,7 +100,23 @@ export function toolCallsFrom(events: readonly string[]): AgentTestRun["toolCall
  * True when a saved test succeeded against the agent exactly as it is now.
  * An edit changes the hash, so an old pass never vouches for a new version.
  */
-export function passedCurrentTest(agent: AgentConfigurable, tests: Pick<AgentTestsSnapshot, "runs"> | undefined): boolean {
+export function testCaseHash(value: Pick<AgentTestCase, "prompt" | "expected" | "source" | "assertions">): string {
+  return fingerprint(JSON.stringify({ prompt: value.prompt, expected: value.expected, source: value.source, assertions: value.assertions ?? [] }));
+}
+
+export function testSuiteHash(cases: readonly AgentTestCase[], agentId: string): string {
+  return fingerprint(JSON.stringify(cases.filter(item => item.agentId === agentId).map(item => [item.id, testCaseHash(item)]).sort((a, b) => a[0]!.localeCompare(b[0]!))));
+}
+
+export function passedCurrentTest(agent: AgentConfigurable, tests: AgentTestsSnapshot | undefined): boolean {
   const current = agentHash(agent);
-  return (tests?.runs ?? []).some(run => run.agentId === agent.id && run.agentHash === current && run.status === "succeeded");
+  const cases = tests?.cases.filter(item => item.agentId === agent.id) ?? [];
+  const suite = testSuiteHash(cases, agent.id);
+  return cases.length > 0 && cases.every(item => {
+    const run = tests?.runs.slice().reverse().find(run => run.agentId === agent.id && run.caseId === item.id &&
+      run.agentHash === current && run.caseHash === testCaseHash(item) && run.suiteHash === suite);
+    return !!run && run.status === "succeeded" && run.review?.verdict === "pass" && run.evidenceCurrent === true &&
+      (run.assertionResults?.length ?? 0) === (run.assertions?.length ?? 0) &&
+      (run.assertionResults ?? []).every(result => result.passed);
+  });
 }

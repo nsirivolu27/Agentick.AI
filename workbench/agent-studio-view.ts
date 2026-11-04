@@ -1,6 +1,7 @@
 import { agentReadiness } from "./agent-studio.js";
 import { AGENT_STARTERS, configurableStages, type AgentConfigurable } from "./agent-configurables.js";
-import { agentHash, passedCurrentTest, type AgentTestRun, type AgentTestsSnapshot } from "./agent-tests-model.js";
+import { agentHash, passedCurrentTest, testCaseHash, testSuiteHash, type AgentTestRun, type AgentTestsSnapshot } from "./agent-tests-model.js";
+import { compareTestRuns } from "./agent-test-comparison.js";
 import { BOT_REPOSITORY_TOOLS, effectiveToolPolicy } from "./bot-schema.js";
 import type { ChatModelOption } from "./chat.js";
 import type { PipelineConfig } from "./pipeline.js";
@@ -27,7 +28,11 @@ const SECTIONS: { id: StudioSection; label: string; path: string }[] = [{ id: "s
 export function agentTestHistory(agent: AgentConfigurable, tests: AgentTestsSnapshot | undefined) {
   const current = agentHash(agent);
   const runs = (tests?.runs ?? []).filter(run => run.agentId === agent.id).slice().reverse();
-  return { current, cases: (tests?.cases ?? []).filter(item => item.agentId === agent.id), runs: runs.map(run => ({ run, stale: run.agentHash !== current })) };
+  const cases = (tests?.cases ?? []).filter(item => item.agentId === agent.id);
+  return { current, cases, runs: runs.map(run => {
+    const testCase = cases.find(item => item.id === run.caseId);
+    return { run, stale: run.agentHash !== current || run.evidenceCurrent === false || !testCase || run.caseHash !== testCaseHash(testCase) || run.suiteHash !== testSuiteHash(cases, agent.id) };
+  }) };
 }
 
 /** The one thing to do next for this agent, derived from what is saved and what was tested. */
@@ -41,8 +46,10 @@ export function nextAction(snapshot: WorkbenchSnapshot, agent: AgentConfigurable
   if (latest.run.status === "running") return { label: "Wait for the test", href: `#/agent-studio/${id}/test` };
   if (latest.stale) return { label: "Run test again", href: `#/agent-studio/${id}/test` };
   if (latest.run.status !== "succeeded") return { label: "Fix and run test again", href: `#/agent-studio/${id}/test` };
+  if (latest.run.assertionResults?.some(result => !result.passed)) return { label: "Fix and run test again", href: `#/agent-studio/${id}/test` };
   if (!latest.run.review) return { label: "Review result", href: `#/agent-studio/${id}/test` };
   if (latest.run.review.verdict !== "pass") return { label: "Improve and test again", href: `#/agent-studio/${id}` };
+  if (!passedCurrentTest(agent, tests)) return { label: "Finish the test suite", href: `#/agent-studio/${id}/test` };
   const assigned = snapshot.pipelines ? configurableStages(snapshot.pipelines.config, agent) : [];
   if (!assigned.length) return { label: "Assign to workflow", href: `#/agent-studio/${id}/workflow` };
   return { label: "Run in a workflow", href: `#/agent-studio/${id}/workflow` };
@@ -129,7 +136,8 @@ function setup(snapshot: WorkbenchSnapshot, pipeline: NonNullable<WorkbenchSnaps
     <label>Name<input name="name" required maxlength="80" value="${value("name", selected?.name ?? starter.name)}"></label>
     <label>Outcome<input name="purpose" required maxlength="300" value="${value("purpose", selected?.purpose ?? starter.purpose)}"></label>
     <label>Instructions<textarea name="instructions" required maxlength="4000" rows="7">${value("instructions", selected?.instructions ?? starter.instructions)}</textarea></label>${example}
-    <legend>Knowledge</legend><p class="text-2">Evidence the agent can reference. It reads files from the attached repository through the tools below; reference material attached to a work item is passed in as well.</p>
+    <legend>Knowledge</legend><p class="text-2">Sources the agent can reference. It reads files from the attached repository through the tools below; reference material attached to a work item is passed in as well.</p>
+    <label>Required source paths<textarea name="requiredSourcePaths" rows="3" maxlength="2000" placeholder="One repository-relative path per line">${value("requiredSourcePaths", (selected ? selected.bot.requiredSourcePaths ?? [] : starter.requiredSourcePaths ?? []).join("\n"))}</textarea></label><small>Every named file must return nonempty content before an answer is accepted. Enable required source reading and allow enough tool calls. Saving a draft does not verify that the files exist.</small>
     <dl class="agent-kv"><div><dt>Repository</dt><dd>${project ? `<code>${escape(project.root)}</code>` : 'None attached. <a href="#/desk/new">Add source</a> from Work items.'}</dd></div><div><dt>Validation command</dt><dd>${project?.checks.length ? project.checks.map(check => `<code>${escape([check.executable, ...check.args].join(" "))}</code>`).join(", ") : '<span class="text-3">None</span>'}</dd></div><div><dt>Documents</dt><dd><a href="#/documents">Reference documents</a> attach to a work item, not to the agent.</dd></div></dl>
     <fieldset class="agent-studio-tools"><legend>Tools</legend><p class="text-2">Actions the agent may request. Only implemented, read only tools are listed.</p>${BOT_REPOSITORY_TOOLS.map(tool => `<label class="checkbox"><input type="checkbox" name="tools" value="${tool}" ${tools.includes(tool) ? "checked" : ""}>${toolLabels[tool]} <span class="text-3">· ${tool}</span></label>`).join("")}<small>Repository reads only. Nothing checked means no file access. Additional external servers are not connected by this form.</small></fieldset>
     <div class="form-grid"><label>Model<select name="model" required>${options || '<option value="">Connect a model first</option>'}</select></label><label>Role<select name="kind">${["planner", "coder", "reviewer", "validator"].map(kind => `<option ${kind === (draft?.kind ?? selected?.bot.kind ?? starter.kind) ? "selected" : ""}>${kind}</option>`).join("")}</select></label></div>
@@ -137,6 +145,7 @@ function setup(snapshot: WorkbenchSnapshot, pipeline: NonNullable<WorkbenchSnaps
     ${more("Execution limits", `<div class="form-grid"><label>Model calls<input name="maxSteps" type="number" min="1" max="12" required value="${value("maxSteps", String(selected?.bot.maxSteps ?? 4))}"></label><label>Seconds<input name="timeoutSeconds" type="number" min="15" max="900" required value="${value("timeoutSeconds", String(selected?.bot.timeoutSeconds ?? 120))}"></label><label>Tool calls<input name="maxToolCalls" type="number" min="0" max="11" required value="${value("maxToolCalls", String(selected?.bot.maxToolCalls ?? 3))}"></label></div><small>How much work one run may do. The run stops at the first limit it reaches.</small>`)}
     <legend>Review</legend><label class="checkbox"><input type="checkbox" name="requireSourceRead" ${requireRead ? "checked" : ""}>Require a source read before any answer</label><small>Blocks an answer until a file read returned content. A read proves access, not accuracy; a person still reviews the answer.</small>
     <p class="text-2">Workflow handoffs from this agent wait for ${pipeline.runs[0]?.requiredApprovals ?? snapshot.workflow.requiredApprovals} independent approvals on gated stages. See the Assignment page.</p>
+    <p class="text-3">Purpose → Sources → Tools → Model → Tests → Review. Saving does not install or assign this agent; test this version before assignment.</p>
     <div class="agent-studio-actions"><button class="primary">Save agent</button><a href="#/agent-studio">Back to agents</a>${selected ? `<a href="#/agent-studio/${escape(selected.id)}/test">Run test →</a>` : ""}</div></fieldset></form>`;
   const next = selected ? nextAction(snapshot, selected, models, tests) : undefined;
   const aside = selected ? `<aside class="agent-studio-review" aria-label="Next steps"><h2>Next: ${escape(next!.label)}</h2><p>Save changes before testing. Tests belong to an exact saved version; execution finishing does not mean the answer passed review.</p><a class="secondary" href="${escape(next!.href)}">${escape(next!.label)} →</a><h3>Review safeguards</h3><p>Workflow gates require independent reviewers. Existing runs keep their frozen configuration.</p>${more("Saved definition", `<button class="secondary" data-agent-export="${selected.id}">Copy saved definition</button><p>Saved version v${agentHash(selected)}</p>`)}</aside>` : `<aside class="agent-studio-review" aria-label="Next steps"><h2>After saving</h2><p>The example task becomes this agent's first saved test. Run it on the Test page, review the result, then assign the agent to a stage.</p>${starter.needs ? `<p class="callout warn">${escape(starter.needs)}</p>` : ""}<details><summary>Execution and approvals</summary><p>This is a supervised configuration, not an approved model release. Model training and release signatures remain in <a href="#/studio">Model Studio</a>.</p></details></aside>`;
@@ -185,12 +194,31 @@ function testPage(snapshot: WorkbenchSnapshot, pipeline: NonNullable<WorkbenchSn
     <label>Test prompt<textarea name="prompt" required maxlength="4000" rows="4" placeholder="The task, as a person would hand it over.">${value("prompt", editing?.prompt ?? "")}</textarea></label>
     <label>Expected behaviour<textarea name="expected" maxlength="2000" rows="3" placeholder="What a good answer covers. Shown to the reviewer; never checked automatically.">${value("expected", editing?.expected ?? "")}</textarea></label>
     <label>Source file to read <span class="text-3">(path in the attached repository, optional)</span><input name="source" maxlength="250" value="${value("source", editing?.source ?? "")}" placeholder="SOP.md"></label>
+    ${more("Automatic assertions", `<p class="text-3">Optional JSON checks: contains, excludes, source_read (string value), max_calls, max_tokens, max_duration_ms (numeric value). A named source above is always checked. Text checks are literal, not proof of factual accuracy; unreported usage fails a token check.</p><label>Assertions JSON<textarea name="assertions" rows="5" maxlength="12000" spellcheck="false">${value("assertions", JSON.stringify(editing?.assertions ?? [], null, 2))}</textarea></label>`)}
     <p class="text-2">Permitted tools: ${policy.allowedTools.length ? policy.allowedTools.map(tool => toolLabels[tool as keyof typeof toolLabels] ?? tool).join(", ") : "none"}${selected.bot.requireSourceRead ? " · source read required" : ""} · up to ${selected.bot.maxSteps} model calls, ${policy.maxToolCalls} tool calls, ${selected.bot.timeoutSeconds} s.</p>
     <div class="actions"><button class="secondary">${editing ? "Save changes" : "Save test"}</button>${editing ? '<button type="button" class="quiet" data-test-edit="">Cancel</button>' : ""}</div></fieldset></form>`;
   const shown = draft?.runId ? history.runs.find(entry => entry.run.id === draft.runId) : history.runs[0];
-  const result = shown ? testResult(shown, reviewer, snapshot.actor) : `<div class="empty"><p>No result yet. Save a test and run it.</p></div>`;
+  const result = shown ? testResult(shown, reviewer, snapshot.actor) + comparisonPanel(shown.run, history.runs.map(item => item.run), draft?.baselineId) : `<div class="empty"><p>No result yet. Save a test and run it.</p></div>`;
   const list = history.runs.length > 1 ? more(`All runs (${history.runs.length})`, `<ul class="agent-test-runs">${history.runs.map(entry => `<li><button type="button" class="quiet small" data-test-show="${escape(entry.run.id)}">${when(entry.run.startedAt)}</button> ${outcomePill(entry)} <small>v${entry.run.agentHash}</small></li>`).join("")}</ul>`) : "";
   return `<div class="agent-test-layout"><section class="agent-test-side" aria-label="Saved tests"><h2>Saved tests</h2>${cases}<details ${editing || !history.cases.length ? "open" : ""}><summary>${editing ? "Edit test" : "Create a test"}</summary>${form}</details></section><section class="agent-test-result-wrap" aria-label="Result and evidence"><h2>Result and evidence</h2>${busy ? '<p class="loading" role="status">A test is running. This page updates on its own.</p>' : ""}${result}${list}</section></div>`;
+}
+
+function comparisonPanel(candidate: AgentTestRun, runs: AgentTestRun[], selected?: string): string {
+  const choices = runs.filter(run => run.id !== candidate.id && run.caseId === candidate.caseId);
+  if (!choices.length) return '<p class="text-3">Baseline comparison is available after another run of this saved case. Both runs must use the same suite and frozen sources.</p>';
+  const baseline = choices.find(run => run.id === selected) ?? choices[0]!;
+  const comparison = compareTestRuns(baseline, candidate);
+  const selector = `<label>Compare with baseline<select data-test-baseline>${choices.map(run => `<option value="${escape(run.id)}" ${run.id === baseline.id ? "selected" : ""}>v${escape(run.agentHash)} · ${escape(run.startedAt)} · ${escape(run.status)}</option>`).join("")}</select></label>`;
+  if (!comparison.comparable) return more("Baseline comparison", `${selector}<p role="status">${escape(comparison.reason)}</p>`, true);
+  const rows = [
+    ["Execution", comparison.baseline.execution, comparison.candidate.execution],
+    ["Quality review", comparison.baseline.review, comparison.candidate.review],
+    ["Assertions passed", `${comparison.baseline.passed}/${comparison.baseline.total}`, `${comparison.candidate.passed}/${comparison.candidate.total}`],
+    ["Model calls", comparison.baseline.calls, comparison.candidate.calls],
+    ["Reported tokens", comparison.baseline.tokens ?? "Not reported", comparison.candidate.tokens ?? "Not reported"],
+    ["Elapsed milliseconds", comparison.baseline.elapsedMs ?? "Not recorded", comparison.candidate.elapsedMs ?? "Not recorded"],
+  ];
+  return more("Baseline comparison", `${selector}<p class="text-3">Same saved inputs, suite and frozen source hashes. Token counts are provider-reported; no cost is invented when billing data is unavailable.</p><table><thead><tr><th scope="col">Measure</th><th scope="col">Baseline</th><th scope="col">Selected run</th></tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${escape(String(cell))}</td>`).join("")}</tr>`).join("")}</tbody></table>${more("Compare answers", `<h3>Baseline</h3><pre class="agent-answer">${escape(baseline.summary)}</pre><h3>Selected run</h3><pre class="agent-answer">${escape(candidate.summary)}</pre>`)}`, true);
 }
 
 function testResult(entry: { run: AgentTestRun; stale: boolean }, reviewer: boolean, actor: string): string {
@@ -200,8 +228,10 @@ function testResult(entry: { run: AgentTestRun; stale: boolean }, reviewer: bool
   const calls = run.toolCalls.length ? `<ul class="plain">${run.toolCalls.map(call => `<li><code>${escape(call.name)}</code>${call.path ? ` ${escape(call.path)}` : ""} · ${call.outcome === "read" ? "read, content returned" : call.outcome === "empty" ? "read, file empty" : call.outcome === "missing" ? "read, file missing" : "called"}</li>`).join("")}</ul>` : '<span class="text-3">No tool calls</span>';
   const evidence = run.source ? (run.sourceRead ? status("ok", `Read ${run.source}`) : status("bad", `${run.source} was not read`)) : run.sourceRead ? status("ok", "A source was read") : status("neutral", "No source read");
   const failure = run.error ? `<p class="callout bad" role="status"><strong>${run.status === "cancelled" ? "Stopped." : "Execution failed."}</strong>${escape(run.error)}</p>` : "";
-  const staleNote = stale ? `<p class="callout warn" role="status"><strong>Out of date.</strong>This run tested version v${run.agentHash}; the agent has changed since. Run the test again before relying on it.</p>` : "";
-  const answer = run.summary ? `<h3>Answer</h3><pre class="agent-answer">${escape(run.summary)}</pre>` : "";
+  const staleNote = stale ? `<p class="callout warn" role="status"><strong>Out of date.</strong>This run tested version v${run.agentHash}; the agent, saved test suite or source evidence changed, or this historical run lacks a version binding. Run the test again before relying on it.</p>` : "";
+  const answer = (run.summary ? `<h3>Answer</h3><pre class="agent-answer">${escape(run.summary)}</pre>` : "") +
+    (run.evidence?.length ? more("Frozen source evidence", run.evidence.map(source => `<h3>${escape(source.path)}</h3><p class="text-3">Read ${escape(source.readAt)}</p><pre class="agent-answer">${escape(JSON.stringify({ sha256: source.sha256, content: source.content }, null, 2))}</pre>`).join("")) : "") +
+    (run.assertionResults?.length ? `<h3>Automatic assertions</h3><ul class="plain">${run.assertionResults.map(result => `<li>${status(result.passed ? "ok" : "bad", result.passed ? "Passed" : "Failed")} ${escape(result.label)}<small>${escape(result.detail)}</small></li>`).join("")}</ul>` : "");
   const review = run.review ? `<h3>Quality review</h3><p>${status(run.review.verdict === "pass" ? "ok" : run.review.verdict === "fail" ? "bad" : "warn", run.review.verdict)} by ${escape(run.review.by)} · ${escape(ago(run.review.at))}${run.review.note ? `<br>${escape(run.review.note)}` : ""}</p>`
     : run.status === "running" ? "" : run.status !== "succeeded" ? `<h3>Quality review</h3><p class="text-2">No answer to review: the execution did not finish. Fix the cause and run the test again.</p>` : `<h3>Quality review</h3>${reviewer ? `<form id="agent-test-review" data-run="${escape(run.id)}" class="agent-test-review"><p class="text-2">Did the answer do what the test expected? This is separate from the execution finishing.</p><div class="actions"><label class="checkbox"><input type="radio" name="verdict" value="pass" required>Pass</label><label class="checkbox"><input type="radio" name="verdict" value="fail">Fail</label><label class="checkbox"><input type="radio" name="verdict" value="unsure">Unsure</label></div><label>Note<textarea name="note" maxlength="2000" rows="2" placeholder="What was right or wrong, against the expected behaviour."></textarea></label><button class="secondary">Record review</button></form>` : '<p class="text-2">An approver or admin records the quality review.</p>'}`;
   return `<article class="agent-test-result" aria-label="Test result">${staleNote}<div class="agent-test-status">${outcomePill(entry)}</div>${failure}

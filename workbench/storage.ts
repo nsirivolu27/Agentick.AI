@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { materialSchema, materialsSchema } from "./materials.js";
+import { approvalRecordSchema, outputRevisionSchema, sourceHistorySchema, reviewSourceSchema } from "./review-evidence.js";
 import { setting } from "../env.js";
 import { pipelineSchema, type PipelineConfig, type PipelineRun } from "./pipeline.js";
 import { dedupeKeyFor, hashIntent, jiraIntentSchema, type PendingJiraAction } from "./jira.js";
@@ -60,6 +61,11 @@ const stageRunSchema = z.object({
   outputBy: z.string().max(200),
   approvals: z.array(z.string().min(1).max(200)).max(10),
   completedAt: z.string().datetime().optional(),
+  draft: z.object({ text: z.string().max(4000), hash: z.string().regex(/^[a-f0-9]{64}$/),
+    by: z.string(), jobId: z.string().min(1).max(200), at: z.string().datetime() }).strict().optional(),
+  outputVersion: z.number().int().min(1).optional(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  approvalRecords: z.array(approvalRecordSchema).optional(), revisions: z.array(outputRevisionSchema).max(100).optional(),
+  executionSources: z.array(reviewSourceSchema).max(12).optional(),
 }).strict();
 
 const eventSchema = z.object({
@@ -81,7 +87,7 @@ const runSchema = z.object({
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   status: z.enum(["running", "paused", "blocked", "complete", "cancelled"]),
   current: z.number().int().min(0), stages: z.array(stageRunSchema).min(1),
-  events: z.array(eventSchema), jira: z.array(jiraSchema),
+  events: z.array(eventSchema), jira: z.array(jiraSchema), sourceHistory: sourceHistorySchema.optional(),
 }).strict();
 
 const deliveryStepSchema = z.object({

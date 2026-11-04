@@ -8,6 +8,7 @@ export function readPipelineForm(previous: PipelineConfig, data: FormData, hasBo
     jira: { enabled: data.has("jiraEnabled"), project: field("project"), issueType: field("issueType") },
     stages: previous.stages.map((stage, index) => ({ ...structuredClone(stage), ...(hasBots ? { bot: {
       ...(stage.bot?.requireSourceRead !== undefined ? { requireSourceRead: stage.bot.requireSourceRead } : {}),
+      ...(stage.bot?.requiredSourcePaths ? { requiredSourcePaths: [...stage.bot.requiredSourcePaths] } : {}),
       allowedTools: BOT_REPOSITORY_TOOLS.filter(tool => data.has(`tool-${index}-${tool}`)), maxToolCalls: Number(field(`toolcalls-${index}`)),
       ...(field(`profile-${index}`) ? { profile: field(`profile-${index}`) as NonNullable<BotPolicy["profile"]> } : {}),
       kind: field(`bot-${index}`) as BotPolicy["kind"], maxSteps: Number(field(`steps-${index}`)), timeoutSeconds: Number(field(`timeout-${index}`)),

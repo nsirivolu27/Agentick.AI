@@ -11,7 +11,9 @@ export default defineConfig({
     trace: "retain-on-failure",
     launchOptions: {
       ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}),
-      ...(process.env.PLAYWRIGHT_LOW_MEMORY === "1" ? { args: ["--single-process", "--no-zygote", "--disable-gpu"] } : {}),
+      // Keep process isolation: single-process Chromium is unstable during accessibility scans.
+      ...(process.env.PLAYWRIGHT_LOW_MEMORY === "1" ? { args: ["--renderer-process-limit=1", "--disable-gpu", "--js-flags=--max-old-space-size=192"] } : {}),
+      ...(process.env.PLAYWRIGHT_SINGLE_PROCESS === "1" ? { args: ["--single-process", "--no-zygote", "--disable-gpu", "--js-flags=--max-old-space-size=192"] } : {}),
     },
   },
   webServer: {

@@ -25,12 +25,27 @@ export function marketplacePage(snapshot: WorkbenchSnapshot, id: string | undefi
     const search = query.get("q") ?? "";
     const category = query.get("category") ?? "";
     const recipes = marketplaceRecipes(snapshot, search, category);
+    const published = studio.releases.filter(release => {
+      const project = studio.projects.find(item => item.id === release.projectId);
+      const reviewers = new Set(release.approvals.filter(item => item.contentHash === release.contentHash &&
+        (release.allowSelfApproval || item.actor !== release.requestedBy)).map(item => item.actor));
+      return release.status === "approved" && reviewers.size >= release.requiredApprovals && project?.status === "active" &&
+        (!category || CATEGORIES[project.recipeId] === category) &&
+        `${project.name} ${project.purpose} ${project.owner}`.toLowerCase().includes(search.trim().toLowerCase());
+    });
+    const releaseCards = published.length ? `<div class="employee-shortcuts">${published.map(release => {
+      const project = studio.projects.find(item => item.id === release.projectId)!;
+      const recipe = studio.recipes.find(item => item.id === project.recipeId);
+      const evaluation = studio.evaluations.find(item => item.id === release.evaluationId);
+      const job = studio.jobs.find(item => item.id === release.jobId);
+      return `<article class="employee-card"><div class="employee-card-heading">${status("ok", `Reviewed v${release.version}`)}</div><h3>${escape(project.name)}</h3><p>${escape(project.purpose)}</p><p class="text-3">Owner: ${escape(project.owner)} · Workspace: ${escape(snapshot.workspaceId)}</p>${more("Package details", `<p>Inputs: ${escape(recipe?.datasetShape ?? "Unavailable")}. No additional tool grants; workflow policy still applies.</p><p>Tested job: ${escape(release.jobId)}. Evaluation: ${escape(release.evaluationId)}.</p><p>${escape(evaluation?.note ?? "Evaluation details unavailable.")}</p><p>Provider: ${escape(job?.provider ?? "Unavailable")}${job?.provider === "local-dev" ? " · Development artifact, not live provider training." : ""}</p><pre class="pre">${escape(release.contentHash)}</pre>`)}<a class="employee-card-link" href="#/studio/${project.id}/use">Choose reviewed version →</a></article>`;
+    }).join("")}</div>` : empty("No matching reviewed releases in this workspace. Draft templates are not published packages.");
     const filters = `<form id="marketplace-search" class="marketplace-search" role="search"><label><span class="visually-hidden">Find a configurable</span><input type="search" name="q" placeholder="Find a configurable" value="${escape(search)}"></label><label><span class="visually-hidden">Use case</span><select name="category"><option value="">All use cases</option>${[...new Set(Object.values(CATEGORIES))].map((item) => `<option value="${item}" ${category === item ? "selected" : ""}>${item}</option>`).join("")}</select></label><button type="submit">Search</button>${search || category ? '<a class="btn" href="#/marketplace">Clear</a>' : ""}</form>`;
     const cards = recipes.length ? `<div class="employee-shortcuts">${recipes.map((recipe) => {
       const projects = studio.projects.filter((project) => project.recipeId === recipe.id && project.status === "active");
       return `<article class="employee-card"><div class="employee-card-heading"><span class="marketplace-category">${escape(CATEGORIES[recipe.id] ?? "General")}</span>${projects.length ? status("neutral", `${projects.length} in workspace`) : '<small class="text-3">Included</small>'}</div><h2>${escape(recipe.title)}</h2><p>${escape(recipe.purpose)}</p><a class="employee-card-link" href="#/marketplace/${recipe.id}">View configurable →</a></article>`;
     }).join("")}</div>` : empty("No matching configurables.", { label: "Clear filters", href: "#/marketplace" });
-    return { title: "Configurable marketplace", context: "Ready-made assistant behavior for your team's work.", body: `${filters}${cards}<p class="text-3">Included with Agentick · Workspace approval rules still apply.</p>` };
+    return { title: "Configurable marketplace", context: "Reviewed releases and draft templates for this workspace.", body: `${filters}<h2>Reviewed model releases</h2>${releaseCards}<p class="text-3">Installation pins the selected release. For an upgrade, create a new version-bound assistant and explicitly reassign future work; existing assistants do not switch silently. The server rechecks evaluation evidence and approvals.</p><h2>Draft templates</h2>${cards}<p class="text-3">Included with Agentick · Templates create drafts, not reviewed installations. Workspace approval rules still apply.</p>` };
   }
   const recipe = studio.recipes.find((item) => item.id === id);
   if (!recipe) return { title: "Configurable not found", crumbs, body: empty("This configurable is not available here.", { label: "Browse configurables", href: "#/marketplace" }) };

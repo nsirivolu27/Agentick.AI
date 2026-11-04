@@ -28,7 +28,7 @@ export async function createDeclarationDemo(content: string, engine: PipelineEng
     }
     const row = type === "Declaration" && sample.records.find(item => item.id === key);
     return row ? Response.json({ __apiName: type, __primaryKey: key, ...row }) : new Response(null, { status: 404 });
-  });
+  }, "offline-replay");
   await foundry.verify();
   const pipelines = companyPipelines(engine, foundry);
   const actor = DEMO_MEMBERS[0]!;

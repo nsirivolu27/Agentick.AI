@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { TransitionContext } from "../registry/transition.js";
 import { createWorkspaceMcpServer } from "./mcp-portal.js";
+import { READ_TOOLS, readToolSession } from "./tool-session.js";
 
 export const chatRequestSchema = z.object({
   model: z.string().trim().min(1).max(200).optional(),
@@ -81,10 +82,15 @@ export async function runWorkspaceAgent(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const observations: { tool: string; arguments: Record<string, unknown>; result: unknown }[] = [];
   let usage: TokenUsage | undefined;
+  let session: ReturnType<typeof readToolSession> | undefined;
   try {
     await server.connect(serverTransport as unknown as Parameters<typeof server.connect>[0]);
     await client.connect(clientTransport as unknown as Parameters<typeof client.connect>[0]);
-    const { tools } = await client.listTools();
+    const discovered = await client.listTools();
+    const tools = discovered.tools.filter(tool => (READ_TOOLS as readonly string[]).includes(tool.name));
+    session = readToolSession({ scope: workspaceId, actor,
+      tools: tools.map(tool => tool.name as typeof READ_TOOLS[number]), maxCalls: 4, timeoutMs: 30_000 },
+      async () => !!(await context.members?.rolesFor(workspaceId, actor))?.length);
     // Small models can answer workflow questions without requesting evidence.
     // Read the authoritative pipeline first so that guessing is not the default path.
     if (reads?.pipelines && /\b(workflow|pipeline|stage|work items?|handoff)\b/i.test(messages.at(-1)?.content ?? "")) {
@@ -92,7 +98,8 @@ export async function runWorkspaceAgent(
       if (!roles?.length) throw new Error("Workspace membership is required.");
       signal.throwIfAborted();
       emit({ type: "tool", name: "get_pipeline", state: "running" });
-      const result = await untilAborted(client.callTool({ name: "get_pipeline", arguments: {} }), signal);
+      const result = await session.call("get_pipeline", signal, bounded =>
+        client.callTool({ name: "get_pipeline", arguments: {} }, undefined, { signal: bounded }));
       emit({ type: "tool", name: "get_pipeline", state: result.isError ? "failed" : "done" });
       const serialized = JSON.stringify(result);
       observations.push({ tool: "get_pipeline", arguments: {}, result: serialized.length > 6_000 ? serialized.slice(0, 6_000) + " [truncated]" : result });
@@ -134,14 +141,15 @@ export async function runWorkspaceAgent(
       if (!currentRoles?.length) throw new Error("Workspace membership is required.");
       if (!tools.some(tool => tool.name === decision.name)) throw new Error("This tool is unavailable in this workspace.");
       emit({ type: "tool", name: decision.name, state: "running" });
-      const result = await untilAborted(client.callTool({ name: decision.name, arguments: decision.arguments }), signal);
+      const result = await session.call(decision.name, signal, bounded =>
+        client.callTool({ name: decision.name, arguments: decision.arguments }, undefined, { signal: bounded }));
       emit({ type: "tool", name: decision.name, state: result.isError ? "failed" : "done" });
       const serialized = JSON.stringify(result);
       observations.push({ tool: decision.name, arguments: decision.arguments, result: serialized.length > 6_000 ? serialized.slice(0, 6_000) + " [truncated]" : result });
     }
   } finally {
-    await client.close();
-    await server.close();
+    session?.close();
+    await Promise.allSettled([client.close(), server.close()]);
   }
 }
 

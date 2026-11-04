@@ -116,7 +116,7 @@ function filterServices(): void {
   for (const group of servicesDialog.querySelectorAll<HTMLElement>(".service-group")) {
     let visible = false;
     for (const link of group.querySelectorAll<HTMLElement>("a.nav")) {
-      const matches = `${group.querySelector("h3")?.textContent} ${link.textContent}`.toLowerCase().includes(query);
+      const matches = `${group.querySelector("h3")?.textContent} ${link.textContent} ${link.dataset.search ?? ""}`.toLowerCase().includes(query);
       link.hidden = !matches || (link.id === "company-navigation" && !companyMode);
       visible ||= !link.hidden;
     }
@@ -965,7 +965,7 @@ document.addEventListener("input", (event) => {
   const key = form.dataset.draft!;
   const value = input.name === "tools" ? new FormData(form).getAll("tools").join(",") : input.type === "checkbox" ? String(input.checked) : input.value;
   studioUi.drafts[key] = { ...studioUi.drafts[key], [input.name]: value,
-    ...(form.hasAttribute("data-output-review") ? { expectedRevision: studioUi.drafts[key]?.expectedRevision ?? form.dataset.revision! } : {}),
+    ...(form.hasAttribute("data-output-review") || form.hasAttribute("data-review-command") ? { expectedRevision: studioUi.drafts[key]?.expectedRevision ?? form.dataset.revision! } : {}),
     ...(form.id === "agent-studio-editor" ? { expectedVersion: studioUi.drafts[key]?.expectedVersion ?? form.dataset.version! } : {}) };
 });
 document.addEventListener("change", (event) => {
@@ -1115,6 +1115,15 @@ function pipelineAction(action: string, note?: string): Promise<void> {
 }
 document.addEventListener("submit", (event) => {
   const form = event.target as HTMLFormElement;
+  if (form.hasAttribute("data-review-command")) {
+    event.preventDefault();
+    if (busy) return;
+    const fields = new FormData(form);
+    void workflowCommand({ action: form.dataset.reviewCommand, runId: form.dataset.run,
+      expectedRevision: Number(form.dataset.revision), note: String(fields.get("note") ?? ""),
+      ...(form.dataset.reviewCommand === "revise" ? { reason: String(fields.get("reason") ?? "") } : {}) }, form.dataset.draft);
+    return;
+  }
   if (!form.hasAttribute("data-output-review")) return;
   event.preventDefault();
   if (busy) return;
@@ -1669,6 +1678,7 @@ document.addEventListener("submit", async event => {
       const agent = form.id === "agent-studio-import" ? importAgentDefinition(String(fields.get("definition") ?? ""), id)
         : agentConfigurableSchema.parse({ id, name: fields.get("name"), purpose: fields.get("purpose"), instructions: fields.get("instructions"), model: fields.get("model"),
           bot: { kind, requireSourceRead: fields.has("requireSourceRead"), allowedTools: fields.getAll("tools"), maxSteps: Number(fields.get("maxSteps")), timeoutSeconds: Number(fields.get("timeoutSeconds")), maxToolCalls: Number(fields.get("maxToolCalls")),
+            ...(String(fields.get("requiredSourcePaths") ?? "").trim() ? { requiredSourcePaths: String(fields.get("requiredSourcePaths")).split(/\r?\n/).map(path => path.trim()).filter(Boolean) } : {}),
             ...(existing?.bot.profile && existing.bot.kind === kind ? { profile: existing.bot.profile } : {}) } });
       config = saveConfigurable(pipeline.config, agent);
       id = agent.id;
@@ -1704,7 +1714,8 @@ document.addEventListener("submit", async event => {
   try {
     if (kind === "case") {
       await api("/api/agent-tests", { action: "save_case", ...(form.dataset.case ? { id: form.dataset.case } : {}), agentId: form.dataset.agent,
-        title: String(fields.get("title")), prompt: String(fields.get("prompt")), expected: String(fields.get("expected") ?? ""), source: String(fields.get("source") ?? "") });
+        title: String(fields.get("title")), prompt: String(fields.get("prompt")), expected: String(fields.get("expected") ?? ""), source: String(fields.get("source") ?? ""),
+        assertions: JSON.parse(String(fields.get("assertions") ?? "[]") || "[]") });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       if (form.dataset.draft) delete studioUi.drafts[form.dataset.draft];
       notify(form.dataset.case ? "Test saved." : "Test saved. Run it to see the result.");
@@ -1723,6 +1734,13 @@ document.addEventListener("submit", async event => {
   } catch (error) {
     if (scope === `${selectedWorkspace}:${snapshot.actor}`) notify((error as Error).message, true);
   } finally { lock(false); }
+});
+document.addEventListener("change", event => {
+  const select = (event.target as Element).closest<HTMLSelectElement>("[data-test-baseline]");
+  if (!select || !route.id) return;
+  const key = `agent-test:${route.id}`;
+  studioUi.drafts[key] = { ...studioUi.drafts[key], baselineId: select.value };
+  render();
 });
 document.addEventListener("click", async event => {
   const button = (event.target as Element).closest<HTMLElement>("[data-test-edit], [data-test-delete], [data-test-show]");

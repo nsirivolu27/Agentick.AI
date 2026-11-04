@@ -87,7 +87,18 @@ export function createChatAccess(options: {
           const current = connections.read(workspace, actor).find(connection => id.startsWith(`personal/${connection.provider}/`));
           const model = current ? id.slice(`personal/${current.provider}/`.length) : "";
           if (!current?.models.includes(model)) throw new ChatAccessError(403, "This provider connection was removed. Refresh models.");
-          return cloudModel(current.provider, model, current.apiKey, options.request ?? fetch, undefined, undefined, limits?.maxOutputTokens);
+          const provider = cloudModel(current.provider, model, current.apiKey, options.request ?? fetch, undefined, undefined, limits?.maxOutputTokens);
+          return {
+            async invoke(prompt, invocation) {
+              // A cached model must not retain authority after disconnect or
+              // credential rotation between turns of an agent conversation.
+              const latest = connections.read(workspace, actor).find(item => item.provider === current.provider);
+              if (!latest || latest.apiKey !== current.apiKey || !latest.models.includes(model)) {
+                throw new ChatAccessError(403, "This provider connection was removed or changed. Refresh models.");
+              }
+              return provider.invoke(prompt, invocation);
+            },
+          } satisfies AgentModel;
         }
         const managed = !choice.local && options.managedLogin;
         const currentPlan = allowance(await tier(workspace));

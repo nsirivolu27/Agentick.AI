@@ -11,7 +11,8 @@ import { attemptSchema, effectiveToolPolicy, type BotAttempt } from "./bot-schem
 import { BotHandoffError, BotToolPolicyError, runBotWorker } from "./bot-worker.js";
 import { untilAborted, type ChatConfiguration } from "./chat.js";
 import { PipelineError, type PipelineEngine, type PipelineRun } from "./pipeline.js";
-import { agentHash, agentTestCommandSchema, testCaseSchema, testRunSchema, toolCallsFrom, type AgentTestCase, type AgentTestRun, type AgentTestsSnapshot } from "./agent-tests-model.js";
+import { agentHash, agentTestCommandSchema, testCaseSchema, testRunSchema, toolCallsFrom, testCaseHash, testSuiteHash, type AgentTestCase, type AgentTestRun, type AgentTestsSnapshot } from "./agent-tests-model.js";
+import { evaluateTestAssertions } from "./agent-test-assertions.js";
 export { agentHash, agentTestCommandSchema, testCaseSchema, testRunSchema, toolCallsFrom, TEST_RUN_STATUSES, type AgentTestCase, type AgentTestRun, type AgentTestsSnapshot } from "./agent-tests-model.js";
 
 /**
@@ -77,7 +78,21 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
   }
   function snapshot(workspace: string): AgentTestsSnapshot {
     const value = state(workspace);
-    return structuredClone({ cases: value.cases, runs: value.runs, busy: active.has(workspace) });
+    const result = structuredClone({ cases: value.cases, runs: value.runs, busy: active.has(workspace) });
+    const root = options.bots.snapshot(workspace).project?.root;
+    const hashes = new Map<string, string | undefined>();
+    for (const run of result.runs) {
+      run.evidenceCurrent = !!root && run.projectRoot === root && run.evidence !== undefined && run.evidence.every(source => {
+        if (!hashes.has(source.path)) {
+          try {
+            const content = readProjectFile(root, source.path);
+            hashes.set(source.path, content === null ? undefined : digest(content));
+          } catch { hashes.set(source.path, undefined); }
+        }
+        return hashes.get(source.path) === source.sha256;
+      });
+    }
+    return result;
   }
 
   function agentOf(workspace: string, agentId: string): AgentConfigurable {
@@ -111,9 +126,11 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
     const config = pipeline.config;
     const base = config.stages[0]!;
     const at = new Date().toISOString();
-    const brief = [testCase.prompt, testCase.source ? `Source to read with read_project_file: ${testCase.source}` : "", testCase.expected ? `What a good answer covers (for the reviewer, not a claim of success): ${testCase.expected}` : ""].filter(Boolean).join("\n\n");
+    // The expected answer and assertions belong to evaluation, not the model's input.
+    const brief = [testCase.prompt, testCase.source ? `Source to read with read_project_file: ${testCase.source}` : ""].filter(Boolean).join("\n\n");
     return { id: randomUUID(), requestId: randomUUID(), workspaceId: workspace, owner: actor, title: testCase.title, brief, issueKey: null,
-      config: { ...config, stages: [{ ...base, id: "test", name: "Agent test", agent: agent.name, instructions: agent.instructions, approval: false, model: agent.model, bot: structuredClone(agent.bot), context: "A saved test prompt. Nothing here is a workflow handoff." }] },
+      config: { ...config, stages: [{ ...base, id: "test", name: "Agent test", agent: agent.name, instructions: agent.instructions, approval: false, model: agent.model, bot: structuredClone(agent.bot),
+        inputStages: [], outputContract: "Answer the saved prompt using the available source evidence.", context: "A saved test prompt. Nothing here is a workflow handoff." }] },
       version: pipeline.version, revision: 1, requiredApprovals: 1, createdAt: at, updatedAt: at, status: "running", current: 0,
       stages: [{ status: "active", output: "", outputHash: "", outputBy: "", approvals: [] }], events: [], jira: [] };
   }
@@ -125,7 +142,12 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
     const note = (message: string) => { run.events = [...run.events.slice(-59), message.slice(0, 500)]; save(value); };
     try {
       const model = await untilAborted(options.chat!.loadModel(agent.model, { maxOutputTokens: 1024 }), controller.signal);
-      const result = await runBotWorker(attempt, trialRun(value.workspaceId, run.startedBy, agent, testCase), model, controller.signal, note);
+      const result = await runBotWorker(attempt, trialRun(value.workspaceId, run.startedBy, agent, testCase), model, controller.signal, note, [], undefined, source => {
+        const sha256 = digest(source.content);
+        if (!run.evidence!.some(item => item.path === source.path && item.sha256 === sha256)) {
+          run.evidence!.push({ ...source, sha256, readAt: new Date().toISOString() });
+        }
+      });
       controller.signal.throwIfAborted();
       run.summary = result.summary.slice(0, 40_000);
       run.status = "succeeded";
@@ -138,8 +160,9 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
       clearTimeout(timer);
       run.calls = attempt.calls; run.tokenUsage = attempt.tokenUsage;
       run.toolCalls = toolCallsFrom(run.events);
-      run.sourceRead = run.toolCalls.some(call => call.outcome === "read");
+      run.sourceRead = run.toolCalls.some(call => call.outcome === "read" && (!run.source || call.path === run.source));
       run.finishedAt = new Date().toISOString();
+      run.assertionResults = evaluateTestAssertions(run);
       try { save(value); } finally { active.delete(value.workspaceId); }
     }
   }
@@ -159,6 +182,7 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
       if (existing && existing.agentId !== agent.id) throw new PipelineError(409, "A test case stays with the agent it was written for.");
       if (!existing && value.cases.length >= MAX_CASES) throw new PipelineError(409, `A workspace keeps up to ${MAX_CASES} test cases. Delete one first.`);
       const saved = testCaseSchema.parse({ id: existing?.id ?? randomUUID(), workspaceId: workspace, agentId: agent.id, title: input.title, prompt: input.prompt, expected: input.expected, source: input.source,
+        assertions: input.assertions ?? existing?.assertions ?? [],
         createdBy: existing?.createdBy ?? actor, createdAt: existing?.createdAt ?? at, updatedAt: at });
       value.cases = existing ? value.cases.map(item => item.id === saved.id ? saved : item) : [...value.cases, saved];
       save(value);
@@ -177,6 +201,9 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
       const run = value.runs.find(item => item.id === input.runId);
       if (!run) throw new PipelineError(404, "This test run is not in this workspace.");
       if (run.status === "running") throw new PipelineError(409, "Wait for the test to finish before reviewing it.");
+      if (input.verdict === "pass" && (run.status !== "succeeded" || run.assertionResults?.some(result => !result.passed))) {
+        throw new PipelineError(409, "Failed execution or assertions cannot receive a passing quality review.");
+      }
       if (run.review) throw new PipelineError(409, `${run.review.by} already reviewed this run. Run the test again for a fresh review.`);
       run.review = { verdict: input.verdict, note: input.note, by: actor, at };
       save(value);
@@ -193,6 +220,9 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
     const agent = agentOf(workspace, testCase.agentId);
     const { checkout } = await readiness(workspace, agent, testCase);
     const run = testRunSchema.parse({ id: randomUUID(), workspaceId: workspace, caseId: testCase.id, agentId: agent.id, agentHash: agentHash(agent), agentName: agent.name, model: agent.model,
+      caseHash: testCaseHash(testCase), suiteHash: testSuiteHash(value.cases, agent.id), evidence: [], projectRoot: checkout,
+      assertions: [...(testCase.assertions ?? []), ...(testCase.source && !testCase.assertions?.some(rule => rule.kind === "source_read" && rule.value === testCase.source)
+        ? [{ kind: "source_read" as const, value: testCase.source }] : [])],
       prompt: testCase.prompt, expected: testCase.expected, source: testCase.source, startedBy: actor, startedAt: at, status: "running", summary: "", error: "", toolCalls: [], sourceRead: false, calls: 0, tokenUsage: null, events: [] });
     value.runs = [...value.runs, run].slice(-MAX_RUNS);
     save(value);

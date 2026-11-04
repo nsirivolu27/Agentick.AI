@@ -10,6 +10,7 @@ import type { Material } from "./materials.js";
 import type { OntologyDirectory } from "./ontology.js";
 import { registerWorkspaceReads } from "./workspace-read-tools.js";
 import { registerOntologyTools } from "./ontology-mcp.js";
+import { readToolSession } from "./tool-session.js";
 
 const startSchema = z.object({
   action: z.literal("start"), requestId: z.string().uuid(), area: z.literal("VA"),
@@ -128,6 +129,11 @@ export function createAnalystRuntime(options: {
     const client = new Client({ name: "workspace-public-data-analyst", version: "1" });
     const server = new McpServer({ name: "scoped-analyst-reads", version: "1" });
     const reader = options.ontology(job.workspaceId);
+    const session = readToolSession({ scope: job.workspaceId, actor: job.owner,
+      tools: ["get_pipeline_run", "summarize_declaration_sample", "get_ontology_object",
+        ...(job.request.scope === "bounded_live" ? ["lookup_openfema_declarations" as const] : [])],
+      maxCalls: 3, timeoutMs: 15_000 },
+      async () => (await options.authorize(job.workspaceId, job.owner)).some(role => role === "author" || role === "admin"));
     try {
       signal.throwIfAborted();
       job.status = "running"; job.updatedAt = new Date().toISOString(); save();
@@ -138,7 +144,7 @@ export function createAnalystRuntime(options: {
         description: "Explicit bounded read of OpenFEMA: at most ten rows, two pages, one retry per page, twelve seconds.",
         inputSchema: z.object({ area: z.literal("VA"), county: z.string().max(80) }).strict(),
         annotations: { readOnlyHint: true },
-      }, async ({ area, county }) => ({ content: [{ type: "text", text: JSON.stringify(await boundedDeclarations(area, county, signal, options.request)) }] }));
+      }, async ({ area, county }, extra) => ({ content: [{ type: "text", text: JSON.stringify(await boundedDeclarations(area, county, AbortSignal.any([signal, extra.signal]), options.request)) }] }));
       const [caller, receiver] = InMemoryTransport.createLinkedPair();
       await server.connect(receiver); await client.connect(caller);
       async function read<T>(tool: string, inputs: Record<string, string>, reason: string, summarize: (result: T) => string): Promise<T> {
@@ -148,7 +154,8 @@ export function createAnalystRuntime(options: {
         const entry: AnalystTrace = { tool, inputs, reason, startedAt: new Date().toISOString(), durationMs: 0, outcome: "running", summary: "Waiting for the actual tool response." };
         job.trace.push(entry); save(); const start = performance.now();
         try {
-          const result = await client.callTool({ name: tool, arguments: inputs });
+          const result = await session.call(tool, signal, bounded =>
+            client.callTool({ name: tool, arguments: inputs }, undefined, { signal: bounded }));
           signal.throwIfAborted();
           if (result.isError || !Array.isArray(result.content) || result.content[0]?.type !== "text") throw new Error("Tool failed");
           const value = JSON.parse(result.content[0].text as string) as T;
@@ -227,6 +234,7 @@ export function createAnalystRuntime(options: {
           : "The analyst could not verify the source or the work item changed. Review the trace and retry; no result was fabricated.";
       }
     } finally {
+      session.close();
       await Promise.allSettled([client.close(), server.close()]);
       job.updatedAt = new Date().toISOString(); save();
     }

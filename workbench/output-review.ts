@@ -120,8 +120,17 @@ export function outputReview(options: ReviewOptions): string {
   const originalBlock = `<div class="review-block" aria-label="Original output"><h4>Original output</h4>${progress.draft ? `<p class="fine">${escape(progress.draft.by)} · ${escape(ago(progress.draft.at))}</p>` : attempt ? `<p class="fine">${escape(attempt.model)} · ${escape(ago(attempt.startedAt))}</p>` : ""}${original}</div>`;
 
   // Handoff: what gets recorded. Editable by the owner while the stage is open; read only once recorded.
+  const reviewForm = (action: "complete" | "revise" | "request_changes", initial: string, label: string) => {
+    const key = `review:${run.id}:${phase}:${action}`;
+    const saved = ui?.drafts[key];
+    const revision = saved?.expectedRevision ?? String(run.revision);
+    const stale = revision !== String(run.revision);
+    return `<form data-review-command="${action}" data-draft="${key}" data-run="${run.id}" data-revision="${escape(revision)}"><label class="field"><span>${action === "request_changes" ? "Change request" : "Revised handoff"}</span><textarea name="note" rows="5" required maxlength="4000">${escape(saved?.note ?? initial)}</textarea></label>${action === "revise" ? `<label class="field"><span>Reason for revision</span><textarea name="reason" required maxlength="4000">${escape(saved?.reason ?? "")}</textarea></label>` : ""}<p class="fine">Earlier approvals do not carry forward. Original text and review history remain in the audit record.</p>${stale ? `<p class="callout warn">This work item changed. Copy your edits, then <button type="button" data-output-reset="${key}">reload the current version</button>.</p>` : ""}<button class="secondary small" type="submit" ${options.busy || stale ? "disabled" : ""}>${label}</button></form>`;
+  };
   let handoff: string;
-  if (progress.output) {
+  if (active && owner && progress.output) {
+    handoff = reviewForm("complete", progress.output, "Resubmit for review");
+  } else if (progress.output) {
     handoff = `<p class="fine">Recorded by ${escape(progress.outputBy)}${progress.completedAt ? ` · ${escape(ago(progress.completedAt))}` : ""}</p><pre class="pre">${escape(progress.output)}</pre>`;
   } else if (active && owner && progress.draft) {
     const key = `output:${run.id}:${progress.draft.hash}`;
@@ -141,6 +150,9 @@ export function outputReview(options: ReviewOptions): string {
   } else {
     handoff = `<p class="text-3">Not reached yet.</p>`;
   }
+  if (current && owner && progress.status === "awaiting_review") handoff += more("Revise recorded output", reviewForm("revise", progress.output, "Save revision and reopen"));
+  if (progress.revisions?.length) handoff += more("Output revision history", progress.revisions.map(revision =>
+    more(`Revision ${revision.version} · ${escape(revision.kind)}`, `<p>${escape(revision.by)} · ${escape(revision.reason)}</p><p class="fine">Earlier approvals invalidated: ${revision.priorApprovers.map(escape).join(", ") || "none"}.</p><h5>Before</h5><pre class="pre">${escape(revision.before)}</pre><h5>After</h5><pre class="pre">${escape(revision.after)}</pre>`)).join(""));
   const handoffBlock = `<div class="review-block review-handoff" aria-label="Handoff"><h4>Handoff</h4>${handoff}</div>`;
 
   // Approval: who still has to agree, and why this person can or cannot.
@@ -153,6 +165,9 @@ export function outputReview(options: ReviewOptions): string {
     approval = `${pill({ tone: "warn", label: "Awaiting approval" })}<p class="fine">${progress.approvals.length} of ${run.requiredApprovals} approvals${progress.approvals.length ? ` · ${progress.approvals.map(escape).join(", ")}` : ""}</p>
       ${eligible ? options.where === "desk" ? `<button class="primary" data-pipeline-action="approve" ${options.busy ? "disabled" : ""}>Approve this handoff</button>` : `<a class="primary small" href="#/desk/${run.id}">Review on the work item</a>` : `<p class="text-2">${reason}</p>`}`;
   } else approval = `${pill({ tone: "neutral", label: "Review gate" })}<p class="fine">${run.requiredApprovals} independent approvals after the handoff is submitted.</p>`;
+  if (current && progress.status === "awaiting_review" && (roles.includes("admin") || roles.includes("approver")) && actor !== run.owner && actor !== progress.outputBy) {
+    approval += more("Request changes", reviewForm("request_changes", "", "Return to author"));
+  }
   // The audit package is the same facts as this grid, as a file an auditor can keep and verify offline.
   const auditLinks = `<p class="fine audit-links">Audit package: <a href="/api/audit-package?run=${encodeURIComponent(run.id)}&amp;format=markdown" download>Markdown</a> · <a href="/api/audit-package?run=${encodeURIComponent(run.id)}&amp;format=json" download>JSON</a></p>`;
   const approvalBlock = `<div class="review-block" aria-label="Approval"><h4>Approval</h4>${approval}${auditLinks}</div>`;

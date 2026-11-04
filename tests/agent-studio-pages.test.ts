@@ -4,7 +4,7 @@ import test from "node:test";
 import { DEFAULT_WORKFLOW } from "../registry/workflow.js";
 import { agentConfigurableSchema, applyConfigurable, saveConfigurable, AGENT_STARTERS } from "../workbench/agent-configurables.js";
 import { agentStudioPage, agentTestHistory, nextAction } from "../workbench/agent-studio-view.js";
-import { agentHash, testRunSchema, type AgentTestsSnapshot } from "../workbench/agent-tests-model.js";
+import { agentHash, testRunSchema, testCaseHash, testSuiteHash, type AgentTestsSnapshot } from "../workbench/agent-tests-model.js";
 import { DEFAULT_PIPELINE, memoryPipelines } from "../workbench/pipeline.js";
 import type { WorkbenchSnapshot } from "../workbench/snapshot.js";
 import { emptyStudioUi } from "../workbench/studio-view.js";
@@ -14,6 +14,20 @@ import { emptyStudioUi } from "../workbench/studio-view.js";
 const agent = agentConfigurableSchema.parse({ id: randomUUID(), name: "Docs helper", purpose: "Answer from the SOP.", model: "test-model", instructions: "Read SOP.md and cite it.",
   bot: { kind: "planner", maxSteps: 4, timeoutSeconds: 60, allowedTools: ["read_project_file"], maxToolCalls: 2, requireSourceRead: true } });
 const models = [{ id: agent.model, label: "Test model", provider: "Test", available: true, local: true, detail: "Fixture" }];
+test("analyst and engineering presets expose editable scope without installing an agent", () => {
+  const { snapshot } = fixture();
+  const before = JSON.stringify(snapshot.pipelines);
+  const analyst = agentStudioPage(snapshot, "new", "public-analyst", models, emptyStudioUi());
+  assert.match(analyst.body, /Public data analyst/);
+  assert.match(analyst.body, /name="requiredSourcePaths"/);
+  assert.match(analyst.body, /examples\/ontology\/openfema\/data\/virginia-snapshot.json/);
+  assert.match(analyst.body, /Saving does not install or assign/);
+  assert.match(analyst.body, /Purpose → Sources → Tools → Model → Tests → Review/);
+  const engineering = agentStudioPage(snapshot, "new", "engineering", models, emptyStudioUi());
+  assert.match(engineering.body, /Engineering delivery assistant/);
+  assert.equal(JSON.stringify(snapshot.pipelines), before);
+  assert.notEqual(agentHash(agent), agentHash({ ...agent, bot: { ...agent.bot, requiredSourcePaths: ["SOP.md"] } }));
+});
 
 function fixture(roles: ("author" | "approver" | "admin")[] = ["admin", "author"], assigned = false) {
   const engine = memoryPipelines();
@@ -30,9 +44,12 @@ function run(overrides: Partial<ReturnType<typeof testRunSchema.parse>> = {}) {
     prompt: "Explain the access process.", expected: "Cites SOP.md.", source: "SOP.md", startedBy: "operator", startedAt: "2026-10-12T10:00:00.000Z", finishedAt: "2026-10-12T10:00:04.000Z",
     status: "succeeded", summary: "The team owner approves. <b>bold</b>", error: "", toolCalls: [{ name: "read_project_file", path: "SOP.md", outcome: "read" }], sourceRead: true, calls: 2, tokenUsage: { promptTokens: 120, completionTokens: 40 }, events: ["MCP tool: read_project_file", "Source read: SOP.md (90 characters)"], ...overrides });
 }
-const tests = (...runs: ReturnType<typeof run>[]): AgentTestsSnapshot => ({ cases: [{ id: runs[0]?.caseId ?? randomUUID(), workspaceId: "one", agentId: agent.id, title: "Access process", prompt: "Explain the access process.", expected: "Cites SOP.md.", source: "SOP.md", createdBy: "operator", createdAt: "2026-10-12T09:00:00.000Z", updatedAt: "2026-10-12T09:00:00.000Z" }], runs, busy: false });
+const tests = (...runs: ReturnType<typeof run>[]): AgentTestsSnapshot => {
+  const cases = [{ id: runs[0]?.caseId ?? randomUUID(), workspaceId: "one", agentId: agent.id, title: "Access process", prompt: "Explain the access process.", expected: "Cites SOP.md.", source: "SOP.md", createdBy: "operator", createdAt: "2026-10-12T09:00:00.000Z", updatedAt: "2026-10-12T09:00:00.000Z" }];
+  return { cases, runs: runs.map(item => ({ ...item, evidenceCurrent: item.evidenceCurrent ?? true, caseHash: item.caseHash ?? testCaseHash(cases[0]!), suiteHash: item.suiteHash ?? testSuiteHash(cases, agent.id) })), busy: false };
+};
 
-test("the overview lists configuration status, latest test outcome and workflow assignment per agent, and offers four working templates", () => {
+test("the overview lists configuration status, latest test outcome and workflow assignment per agent, and offers six working templates", () => {
   const { snapshot } = fixture(["admin", "author"], true);
   const html = agentStudioPage(snapshot, undefined, null, models, emptyStudioUi(), "setup", tests(run())).body;
   assert.match(html, /Ready to run/);
@@ -41,7 +58,7 @@ test("the overview lists configuration status, latest test outcome and workflow 
   assert.match(html, new RegExp(`href="#/workflows/${DEFAULT_PIPELINE.stages[0]!.id}"`));
   assert.match(html, /Review result/);
   for (const starter of AGENT_STARTERS) assert.ok(html.includes(starter.name), starter.name);
-  assert.equal(AGENT_STARTERS.length, 4);
+  assert.equal(AGENT_STARTERS.length, 6);
   assert.match(html, /Needs a validation command/);
   assert.match(html, /Import an agent \(advanced\)/);
   const untested = agentStudioPage(snapshot, undefined, null, [], emptyStudioUi(), "setup", undefined).body;
