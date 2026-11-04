@@ -8,6 +8,9 @@ import { createWorkbenchServer } from "./server.js";
 import { createAgentDemo, DEMO_MEMBERS, DEMO_WORKSPACE, scriptedDemoChat } from "./agent-demo-fixture.js";
 
 import { createDeclarationDemo } from "./openfema-demo.js";
+import { filePipelines } from "./pipeline.js";
+import { analystPersistence } from "./analyst-persistence.js";
+import { createAnalystRuntime } from "./analyst-runtime.js";
 
 const declarations = process.argv.includes("--openfema");
 const live = process.argv.includes("--live");
@@ -32,9 +35,15 @@ const output = fileURLToPath(new URL("./", import.meta.url));
 const scratch = fileURLToPath(new URL("../../.testbuild/", import.meta.url));
 mkdirSync(scratch, { recursive: true });
 const directory = mkdtempSync(join(scratch, "agent-demo-"));
+const saved = declarations ? analystPersistence(setting("AGENTICK_ANALYST_DIRECTORY") ?? fileURLToPath(new URL("../../.magentic-dev/openfema/", import.meta.url))) : undefined;
 const demo = declarations
-  ? await createDeclarationDemo(readFileSync(join(output, "virginia-snapshot.json"), "utf8"))
+  ? await createDeclarationDemo(readFileSync(join(output, "virginia-snapshot.json"), "utf8"), filePipelines(saved!.pipelines))
   : await createAgentDemo(directory, chat);
+const analyst = "runId" in demo ? createAnalystRuntime({
+  pipelines: demo.pipelines, ontology: demo.ontology,
+  material: demo.pipelines.snapshot(DEMO_WORKSPACE).runs[0]!.materials![0]!,
+  persistence: saved!.jobs, authorize: (workspace, actor) => demo.context.members!.rolesFor(workspace, actor),
+}) : undefined;
 const assets = new Map<string, { type: string; body: string | Buffer }>();
 const types: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
 for (const file of readdirSync(output)) {
@@ -48,7 +57,7 @@ for (const file of readdirSync(output)) {
   assets.set(file === "index.html" ? "/" : `/${file}`, { body, type: types[extname(file)]! });
 }
 const origin = `http://127.0.0.1:${port}`;
-const server = createWorkbenchServer({ ...demo, assets, demo: true,
+const server = createWorkbenchServer({ ...demo, assets, demo: true, ...(analyst ? { analyst } : {}),
   guard(request) {
     if (request.headers.host !== `127.0.0.1:${port}` || (request.headers.origin && request.headers.origin !== origin)) return { status: 403, message: "Open this demo on its loopback URL." };
   },
@@ -62,6 +71,7 @@ async function close() {
   if (closing) return;
   closing = true;
   server.close(); server.closeAllConnections();
+  await analyst?.close();
   if ("bots" in demo) {
     await demo.agentTests.close();
     await demo.bots.close();
@@ -71,7 +81,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => { 
 process.on("message", message => { if ((message as { type?: string })?.type === "shutdown") void close().then(() => process.disconnect?.()); });
 server.listen(port, "127.0.0.1", () => {
   if ("runId" in demo) {
-    console.log(`OpenFEMA work item: ${origin}/#/desk/${demo.runId}`);
+    console.log(`OpenFEMA analyst: ${origin}/#/analyst`);
     console.log("Real public records · offline Foundry replay · rule-based analyst · demo reviewers");
     return;
   }
