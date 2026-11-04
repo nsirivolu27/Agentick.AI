@@ -42,6 +42,28 @@
   --ease: 140ms cubic-bezier(.2, .7, .2, 1);
   font-size: 14px; line-height: 1.55; scrollbar-color: var(--border-strong) var(--bg);
 }
+
+.analyst-page { display: grid; gap: 16px; min-width: 0; font-size: 15px; }
+.analyst-page .panel { padding: 20px; min-width: 0; }
+.analyst-page h2 { margin: 0 0 12px; font-size: 18px; }
+.analyst-page h3 { margin: 0 0 8px; font-size: 15px; }
+.analyst-page form { max-width: 720px; }
+.analyst-summary dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; font-size: 14px; }
+.analyst-summary dt { color: var(--text-2); }
+.analyst-summary dd { margin: 0; overflow-wrap: anywhere; }
+.analyst-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.analyst-stages { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 20px; margin: 0; list-style-position: inside; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; }
+.analyst-page pre { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; max-width: 100%; font-size: 13px; line-height: 1.6; }
+.analyst-page code { overflow-wrap: anywhere; }
+.analyst-output { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-sans, system-ui, sans-serif); font-size: 15px; line-height: 1.6; }
+.analyst-source + .analyst-source { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.analyst-trace { list-style: none; padding: 0; margin: 0; }
+.analyst-trace > li { border-top: 1px solid var(--line); padding: 16px 0; }
+.analyst-history li { display: flex; gap: 12px; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.analyst-history a { overflow-wrap: anywhere; }
+.analyst-history span { white-space: nowrap; }
+@media (max-width: 768px) { .analyst-columns { grid-template-columns: minmax(0, 1fr); } .analyst-page .panel { padding: 16px; } }
+@media (max-width: 480px) { .analyst-summary dl { grid-template-columns: minmax(0, 1fr); gap: 4px; } .analyst-summary dd { margin-bottom: 8px; } .analyst-history li { flex-direction: column; } }
 ::selection { background: var(--brand-selection); color: var(--text); }
 [hidden] { display: none !important; }
  body { display: block; }

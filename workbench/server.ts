@@ -52,6 +52,7 @@ export interface WorkspaceIdentity {
   canRunAutomations?: boolean;
 }
 export interface WorkbenchOptions {
+  analyst?: import("./analyst-runtime.js").AnalystRuntime;
   context: TransitionContext;
   // Identity comes from the deployment's authentication system. Accepting an
   // actor in a submitted form would let a writer impersonate an approver.
@@ -205,6 +206,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         const records = await options.context.store.list(workspaceId);
         send(response, 200, {
           ...(options.pipelines ? { pipelines: options.pipelines.snapshot(workspaceId) } : {}),
+          ...(options.analyst ? { analyst: options.analyst.snapshot(workspaceId) } : {}),
           ...(options.bots ? { bots: options.bots.snapshot(workspaceId) } : {}),
           ...(options.scheduler ? { schedule: options.scheduler.snapshot(workspaceId) } : {}),
           ...(options.learning ? { learning: options.learning.snapshot(workspaceId) } : {}),
@@ -401,6 +403,13 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
           send(response, 200, options.mcpAccess(workspaceId));
         }
         return;
+      }
+      if (path === "/api/analyst") {
+        if (!options.analyst) throw new RequestError(503, "Analyst execution is not configured for this workspace.");
+        await pending;
+        const task = pending.then(() => options.analyst!.command(workspaceId, actor, roles, raw, (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals));
+        pending = task.then(() => undefined, () => undefined);
+        send(response, 200, await task); return;
       }
       if (path === "/api/pipeline" || path === "/api/pipeline-mcp") {
         if (!options.pipelines) throw new RequestError(404, "Pipelines are not configured.");
