@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { setting } from "../env.js";
-import type { AgentModel, ChatConfiguration, ChatModelOption } from "./chat.js";
+import type { AgentModel, ChatConfiguration, ChatModelOption, ToolConversation, ToolTurn } from "./chat.js";
 import { usageOf } from "./model-usage.js";
 
 type CloudProvider = "openai" | "anthropic" | "google" | "azure" | "gateway";
@@ -68,6 +68,33 @@ function azureSetup(env?: NodeJS.ProcessEnv) {
 const textBlock = z.object({ type: z.string(), text: z.string().optional() });
 const openaiResponse = z.object({ output: z.array(z.object({ type: z.string(), content: z.array(textBlock).optional() })) });
 const claudeResponse = z.object({ content: z.array(textBlock) });
+const claudeToolResponse = z.object({
+  stop_reason: z.string().nullable().optional(),
+  content: z.array(z.discriminatedUnion("type", [
+    z.object({ type: z.literal("text"), text: z.string() }),
+    z.object({ type: z.literal("tool_use"), id: z.string().min(1).max(200), name: z.string().min(1).max(200), input: z.record(z.unknown()) }),
+  ])).max(50),
+});
+const ANTHROPIC_MESSAGES = "https://api.anthropic.com/v1/messages";
+
+/**
+ * One Claude turn with native tool use. The MCP tool definitions go to the
+ * provider as `tools`; whatever it asks for comes back as tool_use blocks for
+ * the caller to run through its own session. Nothing here runs a tool.
+ */
+async function claudeConverse(model: string, key: string, request: typeof fetch, maxOutputTokens: number,
+  conversation: ToolConversation, options?: { signal: AbortSignal }): Promise<ToolTurn> {
+  const body = { model, max_tokens: maxOutputTokens, system: conversation.system,
+    tools: conversation.tools.map(tool => ({ name: tool.name, description: tool.description ?? "", input_schema: tool.inputSchema })),
+    messages: conversation.messages };
+  const response = await request(ANTHROPIC_MESSAGES, { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify(body), signal: options?.signal ?? AbortSignal.timeout(120_000), redirect: "error" });
+  if (!response.ok) throw new Error("The model provider rejected the request.");
+  const data: unknown = await response.json();
+  const parsed = claudeToolResponse.parse(data);
+  const usage = usageOf(data);
+  return { content: parsed.content, stopReason: parsed.stop_reason ?? "end_turn", ...(usage ? { usage } : {}) };
+}
 const geminiResponse = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string() }) })) });
 
 export function cloudModel(
@@ -84,7 +111,7 @@ export function cloudModel(
         headers.Authorization = `Bearer ${key}`;
         body = { model, input: prompt, store: false, max_output_tokens: maxOutputTokens, text: { format: { type: "json_object" } } };
       } else if (provider === "anthropic") {
-        url = "https://api.anthropic.com/v1/messages";
+        url = ANTHROPIC_MESSAGES;
         headers = { ...headers, "x-api-key": key, "anthropic-version": "2023-06-01" };
         body = { model, max_tokens: maxOutputTokens, messages: [{ role: "user", content: prompt }] };
       } else if (provider === "azure") {
@@ -124,6 +151,8 @@ export function cloudModel(
       const usage = usageOf(data);
       return { content, ...(usage ? { usage } : {}) };
     },
+    // Only Claude gets native tool use here. The other providers keep the JSON decision text, which works everywhere.
+    ...(provider === "anthropic" ? { converse: (conversation, options) => claudeConverse(model, key, request, maxOutputTokens, conversation, options) } : {}),
   };
 }
 
