@@ -1,0 +1,41 @@
+services:
+  workspace:
+    build:
+      context: ../.testbuild/workspace-image
+      dockerfile: ../../deploy/workspace.Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:?Set a reviewed Node 22 image pinned by digest}
+    image: agentick-workspace:local
+    init: true
+    restart: unless-stopped
+    environment:
+      MAGENTIC_PUBLIC_ORIGIN: ${MAGENTIC_PUBLIC_ORIGIN:?Set the browser origin}
+      MAGENTIC_ACCOUNTS_FILE: /run/config/accounts.json
+      MAGENTIC_CLERK_SECRET_KEY: ${MAGENTIC_CLERK_SECRET_KEY:?Configure Clerk backend access}
+      MAGENTIC_CONNECTIONS_KEY: ${MAGENTIC_CONNECTIONS_KEY:?Set a stable 64-character hex vault key}
+    volumes:
+      - workspace-data:/data
+      - type: bind
+        source: ${AGENTICK_ACCOUNTS_PATH:?Set the absolute path to the Clerk accounts configuration}
+        target: /run/config/accounts.json
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:${AGENTICK_HOST_PORT:-4200}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  workspace-data:

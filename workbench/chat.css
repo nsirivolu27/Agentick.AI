@@ -25,6 +25,12 @@
 .chat-evidence summary { color: var(--accent); font-size: 11px; cursor: pointer; margin-bottom: 10px; }
 .chat-tool { display: inline-block; margin: 6px 6px 0 0; padding: 6px 9px; border: 1px solid #51405d; border-radius: 6px; font-size: 10px; color: #d9c4e5; background: #231a2e; overflow-wrap: anywhere; }
 .chat-tool > span { color: var(--positive); }
+.chat-required { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
+.chat-required code, .chat-call code { font-size: 11px; }
+.chat-calls { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.chat-call { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; padding: 6px 9px; border: 1px solid #51405d; border-radius: 6px; background: #231a2e; font-size: 11px; }
+.chat-call small { grid-column: 1 / -1; color: var(--muted); }
+.chat-call-args { color: #d9c4e5; overflow-wrap: anywhere; }
 .chat-progress { color: var(--muted); font-size: 12px; padding: 10px 0; max-width: 850px; margin: auto; }
 .chat-thinking { color: var(--accent); letter-spacing: 2px; margin-right: 8px; animation: pulse 900ms infinite alternate; }
 .chat-composer { margin: 0 24px; padding: 16px; border: 1px solid #65416d; background: var(--input); border-radius: 13px; }

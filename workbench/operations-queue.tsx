@@ -5,20 +5,22 @@ import { filterQueue, operationsQueue, QUEUE_LABELS, type QueueFilter } from "./
 
 // Keep filters across snapshot refreshes, but never share them across identities
 // or workspaces. No credentials, content or preferences go to browser storage.
-let preferences: { scope: string; filter: QueueFilter; query: string } | undefined;
+let preferences: { scope: string; filter: QueueFilter; query: string; mine: boolean } | undefined;
 
 export function OperationsQueue({ snapshot }: { snapshot: WorkbenchSnapshot }) {
   const scope = `${snapshot.workspaceId}\0${snapshot.actor}`;
   const [filter, setFilter] = useState<QueueFilter>(preferences?.scope === scope ? preferences.filter : "all");
   const [query, setQuery] = useState(preferences?.scope === scope ? preferences.query : "");
+  const [mine, setMine] = useState(preferences?.scope === scope ? preferences.mine : false);
   const items = operationsQueue(snapshot);
   const modelUnavailable = !snapshot.studio || Boolean(snapshot.studioError);
-  const visible = filterQueue(items, filter, query);
-  const change = (nextFilter: QueueFilter, nextQuery: string) => {
-    preferences = { scope, filter: nextFilter, query: nextQuery };
-    setFilter(nextFilter); setQuery(nextQuery);
+  const scoped = mine ? items.filter(item => item.owner === snapshot.actor) : items;
+  const visible = filterQueue(scoped, filter, query);
+  const change = (nextFilter: QueueFilter, nextQuery: string, nextMine = mine) => {
+    preferences = { scope, filter: nextFilter, query: nextQuery, mine: nextMine };
+    setFilter(nextFilter); setQuery(nextQuery); setMine(nextMine);
   };
-  const counts = (key: QueueFilter) => key === "all" ? items.length : items.filter(item => item.state === key).length;
+  const counts = (key: QueueFilter) => key === "all" ? scoped.length : scoped.filter(item => item.state === key).length;
   // A workspace with no runs and no projects at all is a first visit, not a quiet day.
   const fresh = !items.length && !(snapshot.pipelines?.runs.length) && !(snapshot.studio?.projects.length) && snapshot.canAuthor;
   return <section className="operations-queue" aria-labelledby="queue-title">
@@ -28,16 +30,17 @@ export function OperationsQueue({ snapshot }: { snapshot: WorkbenchSnapshot }) {
       <a className="queue-evidence-link" href="#/activity">View audit trail <span aria-hidden="true">↗</span></a>
     </div>
     <div className="queue-summary" aria-label="Current work counts">
-      {(["review", "blocked", "active", "ready"] as const).map(key =>
+      {(["review", "blocked", "active", "waiting", "ready"] as const).map(key =>
         <button type="button" key={key} className={`queue-stat ${key}`} aria-pressed={filter === key}
           onClick={() => change(filter === key ? "all" : key, query)}>
           <span>{QUEUE_LABELS[key]}</span><strong>{counts(key)}</strong>
           <small>{key === "review" ? "Eligible for your signature" : key === "blocked" ? "Requires investigation"
-            : key === "active" ? "Open workflow or training" : "A phase is ready to continue"}</small>
+            : key === "active" ? "Open workflow or training" : key === "waiting" ? "Awaiting a person or paused" : "A phase is ready to continue"}</small>
         </button>)}
     </div>
     {modelUnavailable && <p className="queue-data-warning" role="status">Model project data is unavailable. Counts cover only the workflow data that loaded; they do not mean all work is clear.</p>}
     <div className="queue-toolbar">
+      <label className="queue-ownership">Show work<select value={mine ? "mine" : "team"} onChange={event => change(filter, query, event.target.value === "mine")}><option value="team">Entire team</option><option value="mine">Owned by me</option></select></label>
       <div className="queue-filters" role="group" aria-label="Filter work queue">
         {(Object.keys(QUEUE_LABELS) as QueueFilter[]).map(key => <button type="button" key={key}
           aria-pressed={filter === key} onClick={() => change(key, query)}>
@@ -48,7 +51,7 @@ export function OperationsQueue({ snapshot }: { snapshot: WorkbenchSnapshot }) {
         <span aria-hidden="true">⌕</span><input type="search" value={query} placeholder="Search work, owner, or phase"
           onChange={event => change(filter, event.target.value)} /></label>
     </div>
-    <p className="queue-results" role="status" aria-live="polite">{visible.length} of {items.length} work items</p>
+    <p className="queue-results" role="status" aria-live="polite">{visible.length} of {scoped.length} work items{mine ? " owned by you" : " in the team"}</p>
     <div className="queue-table-wrap" tabIndex={0} role="region" aria-label="Work queue table, scroll horizontally on small screens">
       <table className="queue-table">
         <caption className="visually-hidden">Workspace work queue. Opening an item does not approve or execute it.</caption>
@@ -65,15 +68,15 @@ export function OperationsQueue({ snapshot }: { snapshot: WorkbenchSnapshot }) {
         <h3>Nothing here yet</h3>
         <p>This workspace has no runs or projects. Three steps get the first result on this board.</p>
         <ol className="queue-first-steps">
-          <li><a href="#/chat">Connect a model</a><small>Ollama on this computer, or a provider key</small></li>
+          <li><a href="#/connections">Connect a model</a><small>Ollama on this computer, or a provider key</small></li>
           <li><a href="#/workflows">Start a workflow run</a><small>The run appears here with its current stage</small></li>
-          <li><a href="#/studio">Create a model project</a><small>Train, evaluate and approve an assistant</small></li>
+          <li><a href="#/studio">Create a model project</a><small>Optional: train, evaluate and approve a model</small></li>
         </ol>
       </div>
       : <div className="queue-empty"><span aria-hidden="true">{items.length ? "⌕" : "✓"}</span>
       <h3>{items.length ? "No work matches these filters" : modelUnavailable ? "No work items in the available data" : "Nothing needs your attention"}</h3>
       <p>{items.length ? "Try a different status, owner, or search term." : "Completed work remains in its detail pages and audit trail."}</p>
-      {items.length ? <button type="button" className="secondary" onClick={() => change("all", "")}>Clear filters</button>
+      {items.length ? <button type="button" className="secondary" onClick={() => change("all", "", false)}>Clear filters</button>
         : snapshot.canAuthor ? <a className="primary" href="#/desk">Start a work item</a> : <a className="secondary" href="#/activity">Inspect activity</a>}
     </div>)}
     <div className="queue-footnote"><span aria-hidden="true">◇</span> Review eligibility is derived from the current records. Opening an item never bypasses its approval policy.</div>

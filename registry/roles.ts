@@ -29,6 +29,8 @@ export type Membership = z.infer<typeof membershipSchema>;
 export interface MemberDirectory {
   /** The roles this person holds here. Empty when they are not a member. */
   rolesFor(workspaceId: string, actor: string): Promise<readonly Role[]>;
+  /** Everyone who may sign a handoff here, when the directory can list its members. Used to offer reviewers by name. */
+  approvers?(workspaceId: string): Promise<readonly string[]>;
 }
 
 /** A directory held in memory. The shape a database-backed one will also have. */
@@ -38,6 +40,9 @@ export function memoryMembers(seed: readonly Membership[] = []): MemberDirectory
   return {
     async rolesFor(workspaceId, actor) {
       return byKey.get(`${workspaceId}\u0000${actor}`) ?? [];
+    },
+    async approvers(workspaceId) {
+      return seed.filter(entry => entry.workspaceId === workspaceId && (entry.roles.includes("approver") || entry.roles.includes("admin"))).map(entry => entry.actor);
     },
   };
 }

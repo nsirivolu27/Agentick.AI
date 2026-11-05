@@ -7,15 +7,24 @@ import { withCloudModels } from "./model-catalog.js";
 import { ollamaRequest } from "./ollama-request.js";
 import { usageOf } from "./model-usage.js";
 
-const modelListSchema = z.object({ models: z.array(z.object({ name: z.string().min(1).max(200) })).max(500) });
+const modelListSchema = z.object({ models: z.array(z.object({
+  name: z.string().min(1).max(200), size: z.number().nonnegative().optional(),
+  remote_model: z.string().optional(), remote_host: z.string().optional(),
+})).max(500) });
 const ollamaAnswer = z.object({ message: z.object({ content: z.string().min(1) }), done: z.literal(true) });
+
+export function localOllamaName(name: string): boolean {
+  // The shared catalog uses these prefixes for hosted providers, so local aliases cannot claim them.
+  return !/^(?:openai|anthropic|google|azure|gateway|personal)\//i.test(name)
+    && !/(?:^|[:-])cloud(?:$|[-:])/i.test(name);
+}
 
 function selectedDefault(catalog: ChatConfiguration, provider: string, model: string): ChatConfiguration {
   return { ...catalog, provider, model, loadModel: (name = model, limits) => catalog.loadModel(name, limits) };
 }
 
 /** Workbench chat does not require the relay's optional LangChain adapters. */
-export function chatConfiguration(localDemo = false, options: { env?: NodeJS.ProcessEnv; request?: typeof fetch } = {}): ChatConfiguration | undefined {
+export function chatConfiguration(localDemo = false, options: { env?: NodeJS.ProcessEnv; request?: typeof fetch; localOnly?: boolean } = {}): ChatConfiguration | undefined {
   const env = options.env ?? process.env;
   const config = llmConfigFromEnv(env) ?? (localDemo ? llmConfigFromEnv({
     MAGENTIC_LLM_PROVIDER: "ollama", MAGENTIC_LLM_CHAT_MODEL: "qwen2.5-coder:7b",
@@ -53,7 +62,9 @@ export function chatConfiguration(localDemo = false, options: { env?: NodeJS.Pro
       const response = await (options.request ?? fetch)(`${baseUrl.replace(/\/$/, "")}/api/tags`, { signal: AbortSignal.timeout(8_000), redirect: "error" });
       if (!response.ok) throw new Error("Ollama model list is unavailable.");
       const data = modelListSchema.parse(await response.json());
-      return [...new Set(data.models.map((model) => model.name))].sort();
+      return [...new Set(data.models.filter(model => !options.localOnly ||
+        ((model.size ?? 0) > 0 && !model.remote_model && !model.remote_host && localOllamaName(model.name)))
+        .map(model => model.name))].sort();
     },
     async loadModel(name = config.chatModel, limits) {
       return { async invoke(prompt, invocation) {

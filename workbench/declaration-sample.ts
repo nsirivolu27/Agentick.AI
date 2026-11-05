@@ -58,12 +58,14 @@ export function declarationBrief(sample: ReturnType<typeof declarationSample>): 
   ].join("\n");
 }
 
-export async function verifiedDeclarationSample(material: Material, reader: OntologyReader) {
-  if (reader.catalog().mode !== "foundry") throw new Error("A live Foundry Declaration connection is required.");
+export async function verifiedDeclarationSample(material: Material, reader: OntologyReader, signal?: AbortSignal) {
+  if (reader.catalog().mode !== "foundry") throw new Error("A configured Foundry Declaration mapping is required.");
   const sample = declarationSample(material);
   if (!sample.records.length) throw new Error("Attach at least one declaration record to verify against Foundry.");
   const sources = await Promise.all(sample.records.map(async row => {
-    const object = await reader.get({ objectType: "Declaration", primaryKey: row.id });
+    signal?.throwIfAborted();
+    const object = await reader.get({ objectType: "Declaration", primaryKey: row.id }, signal);
+    signal?.throwIfAborted();
     const fields = object.properties;
     if (object.source.mode !== "foundry" || object.primaryKey !== row.id || fields.disasterNumber !== row.disasterNumber
       || fields.state !== row.state || fields.incidentType !== row.incidentType || fields.designatedArea !== row.designatedArea

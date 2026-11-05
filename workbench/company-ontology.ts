@@ -11,7 +11,7 @@ export interface CompanyOntology {
   readWorkflow(workspace: string): Promise<Material>;
 }
 
-export function companyOntology(raw: unknown, readSetting = setting, request: typeof fetch = fetch): CompanyOntology {
+export function companyOntology(raw: unknown, readSetting = setting, request: typeof fetch = fetch, execution: "live" | "offline-replay" = "live"): CompanyOntology {
   const config = ontologyConfigSchema.parse(raw);
   if (!config.workspaces.length) throw new Error("MAGENTIC_ONTOLOGY_FILE requires a company workspace mapping.");
   const bindings = new Map<string, { companyKey: string; workflowKey: string }>();
@@ -23,7 +23,7 @@ export function companyOntology(raw: unknown, readSetting = setting, request: ty
     if (!workflow?.properties.includes("companyId")) throw new Error("Allow Workflow.companyId to verify the tenant binding.");
     bindings.set(item.workspaceId, { companyKey: item.companyKey, workflowKey: item.workflowKey });
   }
-  const directory = createOntologyDirectory(config, readSetting, request);
+  const directory = createOntologyDirectory(config, readSetting, request, process.cwd(), execution);
   async function readWorkflow(workspace: string) {
     const binding = bindings.get(workspace);
     const reader = directory(workspace);

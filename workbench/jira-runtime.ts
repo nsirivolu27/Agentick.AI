@@ -39,6 +39,14 @@ export function createJiraRuntime(
   let closed = false;
 
   return {
+    /** The adapter and its receipts for one workspace, for the Connections directory. No run id needed. */
+    summary(workspaceId: string) {
+      const found = actions.list(workspaceId);
+      const sent = found.filter(item => item.status === "sent" && item.evidence).sort((a, b) => (b.evidence!.at).localeCompare(a.evidence!.at));
+      return { mode: delivery.mode, siteOrigin: delivery.siteOrigin, total: found.length,
+        open: found.filter(item => item.status === "pending" || item.status === "claimed" || item.status === "uncertain").length,
+        ...(sent[0] ? { lastSent: { at: sent[0].evidence!.at, issueKey: sent[0].evidence!.issueKey } } : {}) };
+    },
     inspect(workspaceId: string, raw: unknown) {
       const { runId, offset, limit } = jiraInspectionSchema.parse(raw);
       const run = pipelines.snapshot(workspaceId).runs.find(item => item.id === runId);

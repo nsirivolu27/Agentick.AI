@@ -30,9 +30,10 @@ export function documentsPage(snapshot: WorkbenchSnapshot, selectedId: string | 
   const runs = (snapshot.pipelines?.runs ?? []).filter((run) => run.status !== "complete" && run.status !== "cancelled" && (viewer.admin || run.owner === snapshot.actor));
   const projects = (snapshot.studio?.projects ?? []).filter((project) => project.status === "active");
 
-  const addForm = viewer.author ? `<form id="document-add" class="mt8">
-    <label class="field"><span>Title</span><input name="title" required maxlength="120" placeholder="Grant Inquiry Routing SOP"></label>
-    <label class="field"><span>Text</span><textarea name="text" rows="8" required maxlength="200000" placeholder="Paste the documentation here. It is stored once, by content hash, and never leaves this machine."></textarea></label>
+  const draft = ui?.drafts["document-add"];
+  const addForm = viewer.author ? `<form id="document-add" class="mt8" data-draft="document-add">
+    <label class="field"><span>Title</span><input name="title" required maxlength="120" placeholder="Grant Inquiry Routing SOP" value="${escape(draft?.title ?? "")}"></label>
+    <label class="field"><span>Text</span><textarea name="text" rows="8" required maxlength="200000" placeholder="Paste the documentation here. Review before saving; connections to workflows are separate.">${escape(draft?.text ?? "")}</textarea></label>
     <div class="actions"><button type="submit" class="primary">Add document</button></div>
     <p class="fine">Lines that look like a credential are counted and never shown. Adding a document trains nothing and changes no run.</p></form>` : `<p class="fine">An author adds documents.</p>`;
 
@@ -55,7 +56,7 @@ export function documentsPage(snapshot: WorkbenchSnapshot, selectedId: string | 
       : `<p class="fine">No open run of yours to attach to. Start one from Workflows.</p>`) : "";
     const projectForm = viewer.author && usable ? (projectOptions.length
       ? `<form id="document-project" data-document="${selected.id}" class="inline-form"><label class="field"><span>Add to an assistant's project</span><select name="projectId">${projectOptions.map((project) => `<option value="${project.id}">${escape(project.name)}</option>`).join("")}</select></label><button type="submit" class="secondary">Add as a dataset</button></form><p class="fine">The document becomes one record per paragraph, in its own wording, validated on the way in. Training is a separate step on the project.</p>`
-      : `<p class="fine">Every active project already has this document.</p>`) : "";
+      : `<p class="fine">${projects.length ? "Every active project already has this document." : "No active model projects. You can still attach this document to a work item."}</p>`) : "";
     const connections = [
       ...selected.runs.map((runId) => { const run = snapshot.pipelines?.runs.find((item) => item.id === runId); return run ? `<li>Reference material on <a href="#/workflows">${escape(run.title)}</a></li>` : `<li>Reference material on a run that is no longer listed</li>`; }),
       ...selected.datasets.map((datasetId) => { const dataset = snapshot.studio?.datasets.find((item) => item.id === datasetId); const project = snapshot.studio?.projects.find((item) => item.id === dataset?.projectId); return dataset && project ? `<li>Dataset <a href="#/studio/${project.id}/data">${escape(dataset.name)}</a> on ${escape(project.name)}</li>` : `<li>A dataset that is no longer listed</li>`; }),
@@ -74,6 +75,6 @@ export function documentsPage(snapshot: WorkbenchSnapshot, selectedId: string | 
 
   const body = `${ui?.error ? callout("bad", "That did not work", ` ${escape(ui.error)}`) : ""}
     <div class="split-2">${panel("Documents", list, { count: docs.length ? String(docs.length) : "" })}${selectedHtml}</div>
-    ${more("Add a document", addForm, docs.length === 0)}`;
+    ${more("Add a document", addForm, docs.length === 0 || !!draft)}`;
   return { title: "Documents", context: "Documentation given to this workspace, and what it is connected to", body };
 }

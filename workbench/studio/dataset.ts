@@ -54,7 +54,7 @@ const SECRET_PATTERNS: readonly [string, RegExp][] = [
   ["private-key", /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ["jwt", /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
   ["google-api-key", /\bAIza[0-9A-Za-z_-]{35}\b/],
-  ["assigned-secret", /\b(?:api[_-]?key|secret|password|passwd|token|bearer)\b["']?\s*[:=]\s*["']?[A-Za-z0-9_\-./+]{16,}/i],
+  ["assigned-secret", /\b(?:[A-Za-z0-9]+_)*(?:api[_-]?key|secret|password|passwd|token|bearer)\b["']?\s*[:=]\s*["']?[A-Za-z0-9_\-./+]{16,}/i],
 ];
 
 export function findSecretKinds(text: string): string[] {

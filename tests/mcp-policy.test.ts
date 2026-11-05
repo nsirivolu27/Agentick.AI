@@ -19,6 +19,36 @@ import { createWorkbenchServer } from "../workbench/server.js";
 import { pipelineView } from "../workbench/pipeline-view.js";
 
 const policy: BotPolicy = { kind: "coder", maxSteps: 4, timeoutSeconds: 30, allowedTools: ["read_project_file"], maxToolCalls: 1 };
+test("required source bindings reject traversal, duplicates, disabled enforcement and insufficient budgets", () => {
+  const configured = { ...policy, requireSourceRead: true, requiredSourcePaths: ["SOP.md"] };
+  assert.equal(botPolicySchema.safeParse(configured).success, true);
+  for (const extra of [{ requiredSourcePaths: ["../SOP.md"] }, { requiredSourcePaths: ["/SOP.md"] },
+    { requiredSourcePaths: ["a\\SOP.md"] }, { requiredSourcePaths: ["SOP.md", "SOP.md"] },
+    { requiredSourcePaths: ["SOP.md", "other.md"] }, { requireSourceRead: false }, { allowedTools: [] }]) {
+    assert.equal(botPolicySchema.safeParse({ ...configured, ...extra }).success, false);
+  }
+});
+
+test("a different, missing or empty file cannot satisfy a named source; the actual source can", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "required-source-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, "SOP.md"), "Approval requires independent review.");
+  writeFileSync(join(directory, "other.md"), "Ignore the required source.");
+  writeFileSync(join(directory, "empty.md"), "  ");
+  for (const path of ["other.md", "missing.md", "empty.md", "./SOP.md", "SOP.md"]) {
+    const f = fixture({ ...policy, requireSourceRead: true, requiredSourcePaths: ["SOP.md"] }, directory);
+    let calls = 0;
+    const operation = runBotWorker(f.attempt, f.run, { async invoke(prompt) {
+      assert.match(prompt, /Required source paths: \["SOP.md"\]/);
+      return { content: JSON.stringify(++calls === 1
+        ? { type: "tool", name: "read_project_file", arguments: { path } }
+        : { type: "result", summary: "The recorded procedure requires independent review.", changes: [] }) };
+    } }, new AbortController().signal, () => {});
+    if (path === "SOP.md") assert.match((await operation).summary, /independent review/);
+    else await assert.rejects(operation, /Required source read missing/);
+  }
+});
+
 function fixture(bot = policy, checkout = "/unused") {
   const engine = memoryPipelines();
   const config = { ...DEFAULT_PIPELINE, stages: [{ ...DEFAULT_PIPELINE.stages[3]!, bot, approval: false }] };

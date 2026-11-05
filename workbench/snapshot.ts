@@ -18,6 +18,7 @@ export type RecordView = RegistryRecord & { hash: string; eligible: boolean; val
 
 /** Everything GET /api/workspace returns. The pages render from this and nothing else. */
 export interface WorkbenchSnapshot {
+  agentPackages?: import("./agent-packages.js").AgentPackageSnapshot;
   analyst?: import("./analyst-runtime.js").AnalystSnapshot;
   ontology?: OntologyCatalog;
   pipelines?: PipelineSnapshot;
@@ -29,5 +30,8 @@ export interface WorkbenchSnapshot {
   learning?: LearningState;
   documents?: DocumentState;
   workspaceId: string; actor: string; roles: Role[]; workflow: Workflow;
-  canAuthor: boolean; records: RecordView[]; audit: AuditEvent[]; demo: boolean; mail?: Mailbox; mcp: McpOverview; chat: ChatAvailability;
+  canAuthor: boolean;
+  /** Members who may sign handoffs, when the directory can list them. Offered as reviewers to propose a handoff to. */
+  approvers?: string[];
+  records: RecordView[]; audit: AuditEvent[]; demo: boolean; mail?: Mailbox; mcp: McpOverview; chat: ChatAvailability;
 }

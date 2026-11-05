@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fileSourceSchema } from "./review-evidence-schema.js";
 import { tokenUsageSchema } from "./model-usage.js";
 
 export const BOT_KINDS = ["manual", "planner", "coder", "reviewer", "validator"] as const;
@@ -8,17 +9,27 @@ export const BOT_PROFILE_KINDS = {
   requirements: "planner", planning: "planner", architecture: "planner", implementation: "coder",
   validation: "validator", review: "reviewer", delivery: "planner",
 } as const;
-export const BOT_REPOSITORY_TOOLS = ["list_project_files", "read_project_file", "project_diff"] as const;
+export const BOT_REPOSITORY_TOOLS = ["list_project_files", "read_project_file", "project_diff", "profile_project_file"] as const;
 export const botPolicySchema = z.object({
   kind: z.enum(BOT_KINDS), maxSteps: z.number().int().min(1).max(12),
   profile: z.enum(BOT_PROFILE_IDS).optional(),
   timeoutSeconds: z.number().int().min(15).max(900),
-  allowedTools: z.array(z.enum(BOT_REPOSITORY_TOOLS)).max(3).refine(tools => new Set(tools).size === tools.length,
+  allowedTools: z.array(z.enum(BOT_REPOSITORY_TOOLS)).max(BOT_REPOSITORY_TOOLS.length).refine(tools => new Set(tools).size === tools.length,
     "Tool names must be unique.").optional(),
   maxToolCalls: z.number().int().min(0).max(11).optional(),
   requireSourceRead: z.boolean().optional(),
+  requiredSourcePaths: z.array(z.string().trim().min(1).max(250).refine(path =>
+    !path.startsWith("/") && !path.includes("\\") && !path.includes(":") &&
+    path.split("/").every(part => part !== "" && part !== "." && part !== ".."),
+  "Use a repository-relative file path without traversal.")).max(8)
+    .refine(paths => new Set(paths).size === paths.length, "Required source paths must be unique.").optional(),
 }).strict().superRefine((bot, context) => {
-  if (bot.requireSourceRead && (bot.kind === "manual" || !(bot.allowedTools ?? BOT_REPOSITORY_TOOLS).includes("read_project_file")
+  if (bot.requiredSourcePaths?.length && (!bot.requireSourceRead ||
+      bot.requiredSourcePaths.length > Math.min(bot.maxToolCalls ?? bot.maxSteps - 1, bot.maxSteps - 1))) {
+    context.addIssue({ code: "custom", path: ["requiredSourcePaths"],
+      message: "Required sources need source-read enforcement and enough model/tool calls to read every file before answering." });
+  }
+  if (bot.requireSourceRead && (bot.kind === "manual" || !(bot.allowedTools ?? BOT_REPOSITORY_TOOLS).some(tool => tool === "read_project_file" || tool === "profile_project_file")
     || bot.maxSteps < 2 || bot.maxToolCalls === 0)) {
     context.addIssue({ code: "custom", path: ["requireSourceRead"], message: "A required source read needs file access, at least two model calls and one tool call." });
   }
@@ -59,6 +70,7 @@ export const attemptSchema = z.object({
   /** Summed over the attempt's model calls; null when no provider reported counts. */
   tokenUsage: tokenUsageSchema.nullable(), cost: z.null(),
   events: z.array(z.object({ at: z.string(), message: z.string() }).strict()).max(50),
+  sourceEvidence: z.array(fileSourceSchema).max(12).optional(),
   changes: z.array(changeSchema).max(5), proposalHash: z.string(),
   checks: z.array(z.object({ command: checkSchema, exitCode: z.number().int().nullable(), output: z.string(), passed: z.boolean() }).strict()).max(5),
   checkedTree: z.string(),

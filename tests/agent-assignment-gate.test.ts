@@ -60,8 +60,14 @@ test("assignment waits for a passing test on the current version, in the page an
     const testCase = tests.cases.find(item => item.agentId === agent.id)!;
     await d.agentTests.execute(DEMO_WORKSPACE, operator, roles, { action: "run", caseId: testCase.id, expectedVersion: pipelines.version });
     await d.agentTests.settled(DEMO_WORKSPACE);
-    const after = d.agentTests.snapshot(DEMO_WORKSPACE);
+    let after = d.agentTests.snapshot(DEMO_WORKSPACE);
     assert.equal(after.runs.find(run => run.agentId === agent.id)?.status, "succeeded");
+    assert.equal(passedCurrentTest(agent, after), false, "Execution alone is not a quality pass.");
+    const waiting = await configure(proposed, d.pipelines.snapshot(DEMO_WORKSPACE).version);
+    assert.equal(waiting.status, 409);
+    await d.agentTests.execute(DEMO_WORKSPACE, operator, roles, { action: "review",
+      runId: after.runs.find(run => run.agentId === agent.id)!.id, verdict: "pass", note: "Checked against the saved source." });
+    after = d.agentTests.snapshot(DEMO_WORKSPACE);
     assert.equal(passedCurrentTest(agent, after), true);
     const enabled = agentStudioPage(snapshot, agent.id, null, models, emptyStudioUi(), "workflow", after).body;
     assert.doesNotMatch(enabled, /disabled>Assign saved agent/);

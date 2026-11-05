@@ -79,6 +79,28 @@ test("a quality review is recorded by an approver, once, separately from executi
   } finally { await d.cleanup(); }
 });
 
+test("test evidence freezes the actual source and becomes stale when the attached source changes", async () => {
+  const d = await demo();
+  try {
+    const saved = d.agentTests.snapshot(DEMO_WORKSPACE).cases[0]!;
+    await d.agentTests.execute(DEMO_WORKSPACE, operator, roles.operator, {
+      action: "run", caseId: saved.id, expectedVersion: d.pipelines.snapshot(DEMO_WORKSPACE).version,
+    });
+    await d.agentTests.settled(DEMO_WORKSPACE);
+    const run = d.agentTests.snapshot(DEMO_WORKSPACE).runs[0]!;
+    assert.equal(run.evidenceCurrent, true);
+    assert.equal(run.evidence?.length, 1);
+    assert.equal(run.evidence![0]!.path, "SOP.md");
+    assert.ok(run.evidence![0]!.content.length > 0);
+    assert.match(run.evidence![0]!.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(run.assertionResults!.every(result => result.passed));
+    writeFileSync(join(d.bots.snapshot(DEMO_WORKSPACE).project!.root, "SOP.md"), "A different procedure.");
+    const changed = d.agentTests.snapshot(DEMO_WORKSPACE).runs[0]!;
+    assert.equal(changed.evidenceCurrent, false);
+    assert.equal(changed.evidence![0]!.content, run.evidence![0]!.content);
+  } finally { await d.cleanup(); }
+});
+
 test("a model that answers without reading fails the required-read rule, and a missing or empty source is refused before any model call", { timeout: 90_000 }, async () => {
   const scripted = scriptedDemoChat();
   const unread: ChatConfiguration = { ...scripted, loadModel: async () => ({ async invoke() { return { content: JSON.stringify({ type: "result", changes: [], summary: "The SOP says approval is automatic." }) }; } }) };

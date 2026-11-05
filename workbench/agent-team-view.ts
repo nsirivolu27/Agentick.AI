@@ -5,7 +5,7 @@ import type { WorkbenchSnapshot } from "./snapshot.js";
 import type { Page, StudioUi } from "./studio-view.js";
 import { empty, escape, more, panel, status } from "./ui.js";
 
-const toolNames = { list_project_files: "List files", read_project_file: "Read files", project_diff: "Read changes" };
+const toolNames = { list_project_files: "List files", read_project_file: "Read files", project_diff: "Read changes", profile_project_file: "Profile datasets" };
 
 export function agentTeamPage(snapshot: WorkbenchSnapshot, id: string | undefined, preset: string | null, models: ChatModelOption[], ui: StudioUi): Page {
   const pipeline = snapshot.pipelines;

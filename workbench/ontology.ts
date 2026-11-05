@@ -50,10 +50,11 @@ export const ontologyLinksSchema = ontologyListSchema.extend({ primaryKey, linkT
 type ObjectPolicy = z.infer<typeof objectPolicy>;
 export type OntologyMode = "sample" | "dataset" | "foundry";
 export interface OntologyLineage { name: string; ingestedAt: string; sha256: string; sources: Dataset["sources"] }
-export interface OntologyCatalog { mode: OntologyMode; ontology: string; objectTypes: ObjectPolicy[]; lineage?: OntologyLineage }
+export type EvidenceExecution = "live" | "offline-replay" | "synthetic" | "ingested";
+export interface OntologyCatalog { mode: OntologyMode; ontology: string; objectTypes: ObjectPolicy[]; lineage?: OntologyLineage; execution?: EvidenceExecution }
 export interface OntologyObject {
   objectType: string; primaryKey: string; properties: Record<string, unknown>;
-  source: { mode: OntologyMode; ontology: string; retrievedAt: string; url?: string };
+  source: { mode: OntologyMode; ontology: string; retrievedAt: string; url?: string; execution?: EvidenceExecution; contentSha256?: string };
 }
 export interface OntologyPage { objects: OntologyObject[]; nextPageToken?: string }
 export interface OntologyReader {
@@ -97,7 +98,7 @@ function loadDataset(file: string, configured: ObjectPolicy[] | undefined): { da
   return { dataset, objectTypes, sha256: createHash("sha256").update(text).digest("hex") };
 }
 
-export function createOntologyDirectory(raw: unknown, readSetting: (name: string) => string | undefined = setting, fetcher: typeof fetch = fetch, baseDir: string = process.cwd()): OntologyDirectory {
+export function createOntologyDirectory(raw: unknown, readSetting: (name: string) => string | undefined = setting, fetcher: typeof fetch = fetch, baseDir: string = process.cwd(), foundryExecution: "live" | "offline-replay" = "live"): OntologyDirectory {
   const config = ontologyConfigSchema.parse(raw);
   const readers = new Map<string, OntologyReader>();
   for (const configItem of config.workspaces) {
@@ -107,6 +108,8 @@ export function createOntologyDirectory(raw: unknown, readSetting: (name: string
       : loaded && dataset ? { mode: "dataset", ontology: dataset.name, objectTypes: loaded.objectTypes, lineage: { name: dataset.name, ingestedAt: dataset.ingestedAt, sha256: loaded.sha256, sources: dataset.sources } }
       : { mode: "sample", ontology: "synthetic-demo", objectTypes: sampleTypes };
     const foundry = configItem.mode === "foundry";
+    const execution: EvidenceExecution = foundry ? foundryExecution : dataset ? "ingested" : "synthetic";
+    catalog.execution = execution;
     // Credentials stay in the adapter closure, never in catalog or model output.
     const token = foundry ? readSetting(configItem.tokenSetting) : undefined;
     if (foundry && (!token || !/^[\x21-\x7e]+$/.test(token))) throw new Error(`${configItem.tokenSetting}: set a valid Foundry bearer token locally.`);
@@ -138,8 +141,13 @@ export function createOntologyDirectory(raw: unknown, readSetting: (name: string
       if (!key.success) throw new OntologyError("Foundry returned an invalid object key.");
       // Projection is enforced again locally even if a provider ignores select.
       const properties = Object.fromEntries(type.properties.filter(name => Object.hasOwn(parsed.data, name)).map(name => [name, parsed.data[name]]));
+      // Bind the projected content and its trust mode, not a changing retrieval
+      // timestamp. Equal bytes from replay and a live read are not equivalent evidence.
+      const contentSha256 = createHash("sha256").update(JSON.stringify({
+        objectType: type.apiName, primaryKey: key.data, properties, execution,
+      })).digest("hex");
       return { objectType: type.apiName, primaryKey: key.data, properties,
-        source: { mode: catalog.mode, ontology: catalog.ontology, retrievedAt: new Date().toISOString(), ...(origin ? { url: origin + objectPath(type.apiName, key.data) } : {}) } };
+        source: { mode: catalog.mode, ontology: catalog.ontology, retrievedAt: new Date().toISOString(), execution, contentSha256, ...(origin ? { url: origin + objectPath(type.apiName, key.data) } : {}) } };
     }
     async function request(path: string, type: ObjectPolicy, page: { pageSize: number; pageToken?: string | undefined } | undefined, signal?: AbortSignal): Promise<unknown> {
       const url = new URL(path, origin);
@@ -236,9 +244,9 @@ export function readOntologyConfig(path: string): unknown {
 export function ontologyMaterial(object: OntologyObject): Material {
   const serialized = JSON.stringify(object);
   const hash = createHash("sha256").update(serialized).digest("hex");
-  const content = `Ontology evidence snapshot (${object.source.mode}). SHA-256: ${hash}\n${serialized}`;
+  const content = `Ontology evidence snapshot (${object.source.mode}). Execution: ${object.source.execution ?? "not recorded"}. SHA-256: ${hash}\n${serialized}`;
   if (content.length > 6000) throw new OntologyError("This object exceeds the reference limit. Select fewer properties in the connection configuration.");
-  const label = { sample: "SAMPLE", dataset: "Dataset", foundry: "Foundry" }[object.source.mode];
+  const label = object.source.execution === "offline-replay" ? "Foundry replay" : { sample: "SAMPLE", dataset: "Dataset", foundry: "Foundry" }[object.source.mode];
   return materialSchema.parse({ id: randomUUID(), title: `${label}: ${object.objectType} / ${object.primaryKey}`.slice(0, 120),
     content, ...(object.source.url ? { url: object.source.url } : {}) });
 }
