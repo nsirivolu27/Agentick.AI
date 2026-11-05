@@ -68,13 +68,18 @@ export function operationsQueue(snapshot: WorkbenchSnapshot): QueueItem[] {
       state: "blocked", phase: "Dataset", detail: item.detail, href: item.href, action: "Inspect" });
   }
   for (const run of snapshot.pipelines?.runs ?? []) {
+    if (run.workspaceId !== snapshot.workspaceId) continue;
     if (run.status === "complete" || run.status === "cancelled") continue;
     const stage = run.config.stages[run.current];
     const progress = run.stages[run.current];
     const awaitingReview = progress?.status === "awaiting_review";
     const canReview = progress !== undefined && canReviewTask(snapshot, run);
+    const attempt = snapshot.bots?.attempts.filter(item => item.runId === run.id && item.stageId === stage?.id && item.revision === run.revision).at(-1);
+    const resultReady = Boolean(progress?.draft) || attempt?.status === "ready" || attempt?.status === "applied";
+    const executionFailed = attempt && ["failed", "cancelled", "interrupted"].includes(attempt.status);
+    const owner = snapshot.actor === run.owner || snapshot.roles.includes("admin");
     const state: QueueState = run.status === "blocked" ? "blocked" : run.status === "paused" ? "waiting"
-      : canReview ? "review" : awaitingReview ? "waiting" : "active";
+      : canReview ? "review" : awaitingReview ? "waiting" : resultReady ? (owner ? "ready" : "waiting") : executionFailed ? "blocked" : "active";
     items.push({
       id: `run:${run.id}`, title: run.title, kind: "Workflow run", owner: run.owner, state,
       phase: stage?.name ?? "Workflow",
@@ -82,15 +87,18 @@ export function operationsQueue(snapshot: WorkbenchSnapshot): QueueItem[] {
         : awaitingReview ? "Waiting for independent review."
         : run.status === "paused" ? "Paused by an operator."
         : run.status === "blocked" ? "Open the run to inspect the blocking event and evidence."
+        : resultReady ? "An output is ready for its owner to inspect and submit. It is not approved."
+        : executionFailed ? "The current agent attempt stopped. Inspect the error and evidence before retrying."
         : `Stage ${run.current + 1} of ${run.stages.length} · supervised execution`,
-      href: `#/desk/${run.id}`, action: canReview ? "Review run" : "Open run",
+      href: `#/desk/${run.id}`, action: canReview ? "Review run" : state === "ready" ? "Review output" : executionFailed && state === "blocked" ? "Inspect failure" : "Open run",
     });
   }
   return items.sort((a, b) => priority[a.state] - priority[b.state] || a.title.localeCompare(b.title));
 }
 
-export function filterQueue(items: QueueItem[], filter: QueueFilter, query: string): QueueItem[] {
+export function filterQueue(items: QueueItem[], filter: QueueFilter, query: string, owner?: string): QueueItem[] {
   const needle = query.trim().toLocaleLowerCase();
   return items.filter(item => (filter === "all" || item.state === filter)
+    && (!owner || item.owner === owner)
     && [item.title, item.kind, item.owner, item.phase, item.detail].join(" ").toLocaleLowerCase().includes(needle));
 }

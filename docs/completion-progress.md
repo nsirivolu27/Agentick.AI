@@ -18,6 +18,26 @@ cloud provisioning or live external write was performed.
 | 11 External actions | Existing Jira/automation approval-before-write, duplicate reservations, concurrent changes, uncertain outcomes and restart recovery tested. Confluence remains read-only. |
 | 12 Operations | Authenticated tenant-scoped health, workflow backup/restore CLI, writer-lock checks and unprovisioned AWS backup template. Single-writer limits remain. |
 
+## Workspace completion checklist
+
+Completed and checked in the deterministic suite:
+
+- [x] Grounded chat execution: required reads decided from the request, made before the model answers, answers without them refused with the reason, evidence (tool, arguments, result hash) on every accepted answer. The "3 without a tool call" failure is reproduced as a test and refused.
+- [x] One chat budget shared by browser, server and tools (`MAGENTIC_CHAT_TIMEOUT_SECONDS`; local default 600 s, company 120 s), Stop and disconnect abort the provider request, measured tool use shown per model.
+- [x] Connections directory (`GET /api/connections`) with five states per connector for models, company sources, approved delivery and identity/billing, fed by the runtimes' own summaries and the last real operation. No second credential store.
+- [x] Documentation agent journey over HTTP with the scripted model: reference, agent with one read grant, test, review, two distinct approvals, install, assign, run, handoff, verified audit package; and the negative paths (source unavailable, tool denied, provider unavailable, cancellation, source changed after testing, output changed after approval, retired package, membership revoked).
+- [x] Free local start, discovery exclusions and persistence covered by the existing tests; no change needed.
+
+Blocked (environment, not code):
+
+- [ ] Real provider inference with authorized credentials and upstream revocation.
+- [ ] Live Foundry (waitlisted), real Jira delivery to a company project, Confluence publishing (not implemented), messaging transports (none implemented).
+- [ ] Clerk invite/removal against a real organization.
+
+Not live verified in this pass:
+
+- [ ] Browser journeys (`studio-journey`, `package-journey`, `operations-ui`, `analyst-ui`) and a live local model run with qwen2.5-coder through the new budget; both need the Windows machine with Ollama and the Playwright browsers.
+
 ## Quality measures
 
 Enable **Source-bound quality thresholds** on a case and set minimum supported/

@@ -30,5 +30,8 @@ export interface WorkbenchSnapshot {
   learning?: LearningState;
   documents?: DocumentState;
   workspaceId: string; actor: string; roles: Role[]; workflow: Workflow;
-  canAuthor: boolean; records: RecordView[]; audit: AuditEvent[]; demo: boolean; mail?: Mailbox; mcp: McpOverview; chat: ChatAvailability;
+  canAuthor: boolean;
+  /** Members who may sign handoffs, when the directory can list them. Offered as reviewers to propose a handoff to. */
+  approvers?: string[];
+  records: RecordView[]; audit: AuditEvent[]; demo: boolean; mail?: Mailbox; mcp: McpOverview; chat: ChatAvailability;
 }

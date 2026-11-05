@@ -12,6 +12,7 @@
     <label class="service-search">Find a service<input id="service-search" type="search" placeholder="Search agents, workflows, knowledge…" autocomplete="off"></label>
     <nav class="nav-list services-grid" aria-label="Services">
       <section class="service-group"><h3>Work</h3>
+      <a class="nav" href="#/fema" data-route="fema" data-search="fema disaster declarations briefing emergency management"><span aria-hidden="true">▣</span> Disaster operations</a>
       <a class="nav" href="#/analyst" data-route="analyst"><span aria-hidden="true">▤</span> Public data analyst</a>
       <a class="nav" href="#/workspace" data-route="workspace"><span aria-hidden="true">▣</span> Work queue <span class="nav-count" id="nav-attention" hidden></span></a>
       <a class="nav" href="#/desk" data-route="desk"><span aria-hidden="true">▤</span> Work items</a>
@@ -76,6 +77,7 @@
       <footer><span>Agentick Operations</span><span>Source-based status · explicit human review</span></footer>
     </div>
   </main>
+  <dialog id="resource-assistant" aria-labelledby="resource-assistant-title"><div id="resource-assistant-content"></div></dialog>
   <dialog id="jira-dialog" aria-labelledby="jira-title"><div id="jira-dialog-content"></div></dialog>
   <dialog id="detail" aria-labelledby="detail-title"><div id="detail-content"></div></dialog>
   <dialog id="editor" aria-labelledby="editor-title"><form id="draft-form"><div class="dialog-top"><span class="eyebrow">Agent definition</span><button type="button" class="icon-button" data-close="editor" aria-label="Close editor">×</button></div><h2 id="editor-title">New agent</h2><p class="muted">Drafts stay private to this workspace until they pass review.</p><div class="form-grid"><label>Agent name<input name="name" required pattern="[a-z0-9][a-z0-9-]{1,63}" placeholder="research-assistant"></label><label>Title<input name="title" required maxlength="120" placeholder="Research assistant"></label></div><label>Description<textarea name="description" required maxlength="2000" rows="2" placeholder="What does this agent help people do?"></textarea></label><label>Instructions<textarea name="instructions" required maxlength="4000" rows="5" placeholder="Describe its task, boundaries, and when to ask a person."></textarea></label><label>Required tools<input name="tools" required value="list_conversations"><small>Separate tool names with commas.</small></label><label class="checkbox"><input type="checkbox" name="write"> Request write access</label><p class="form-error" id="form-error" role="alert"></p><div class="dialog-footer"><button type="button" class="secondary" data-close="editor">Cancel</button><button class="primary" type="submit">Save draft</button></div></form></dialog>

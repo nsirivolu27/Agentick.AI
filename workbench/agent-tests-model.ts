@@ -95,6 +95,12 @@ export function toolCallsFrom(events: readonly string[]): AgentTestRun["toolCall
       const last = calls[calls.length - 1]!;
       last.path = read[2]!; last.outcome = read[1] as "read" | "empty" | "missing";
     }
+    // A profile is a computed read of the dataset; the event names the file and its size.
+    const profiled = /^Dataset (profiled|missing): (.+?)(?: \(\d+ rows, \d+ columns, sha256 [a-f0-9]+\))?$/.exec(event);
+    if (profiled && calls.length && calls[calls.length - 1]!.name === "profile_project_file") {
+      const last = calls[calls.length - 1]!;
+      last.path = profiled[2]!; last.outcome = profiled[1] === "profiled" ? "read" : "missing";
+    }
   }
   return calls.slice(0, 50);
 }

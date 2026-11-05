@@ -66,6 +66,10 @@ const stageRunSchema = z.object({
   outputVersion: z.number().int().min(1).optional(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   approvalRecords: z.array(approvalRecordSchema).optional(), revisions: z.array(outputRevisionSchema).max(100).optional(),
   executionSources: z.array(reviewSourceSchema).max(12).optional(),
+  proposal: z.object({ by: z.string().min(1).max(200), at: z.string().datetime(), reviewers: z.array(z.string().min(1).max(200)).max(8),
+    outputHash: z.string().regex(/^(|[0-9a-f]{64})$/) }).strict().optional(),
+  comments: z.array(z.object({ id: z.string().uuid(), by: z.string().min(1).max(200), at: z.string().datetime(), text: z.string().max(4000),
+    outputHash: z.string().regex(/^(|[0-9a-f]{64})$/) }).strict()).max(200).optional(),
 }).strict();
 
 const eventSchema = z.object({

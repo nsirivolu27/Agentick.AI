@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicJson, digest } from "./bot-project.js";
 import { z } from "zod";
-import type { AgentModel } from "./chat.js";
+import type { AgentModel, ChatConfiguration } from "./chat.js";
 import type { PipelineEngine, PipelineRun } from "./pipeline.js";
 import type { AssistantBinding, AssistantResolver } from "./assistant-resolver.js";
 
@@ -43,7 +43,7 @@ export interface SchedulerOptions {
   pipelines: PipelineEngine;
   assistants: AssistantResolver;
   /** Loads the model an assistant's release names. Missing chat configuration throws, and the job records that. */
-  loadModel: (model: string) => Promise<AgentModel>;
+  loadModel: (model: string, workspace: string) => Promise<AgentModel>;
   persistence?: SchedulerPersistence;
   now?: () => string;
   /** Seconds a single model call may take. */
@@ -124,7 +124,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       // retired since the job was queued stops it here.
       const unit = options.assistants(workspace, job.assistantId);
       job.assistant = unit.name; job.model = unit.model; save(workspace);
-      const model = await options.loadModel(unit.model);
+      const model = await options.loadModel(unit.model, workspace);
       controller.signal.throwIfAborted();
       const answer = await model.invoke(stagePrompt(unit, run), { signal: controller.signal });
       controller.signal.throwIfAborted();
@@ -249,9 +249,15 @@ export function fileSchedulePersistence(directory: string): SchedulerPersistence
 }
 
 /** The model loader for a chat configuration: the assistant's release names the model, chat loads it. */
-export function chatModelLoader(chat: { loadModel: (model?: string) => Promise<AgentModel> } | undefined): SchedulerOptions["loadModel"] {
-  return async (model) => {
+export function chatModelLoader(chat: Pick<ChatConfiguration, "loadModel" | "forWorkspace"> | undefined): SchedulerOptions["loadModel"] {
+  return async (model, workspace) => {
     if (!chat) throw new Error("No model is configured. Start Ollama and choose a model before assistants can draft.");
+    if (chat.forWorkspace) {
+      if (!workspace) throw new Error("A workspace is required to load an agent model.");
+      // Resolve for each job so a removed connection cannot survive in a cached catalog.
+      const catalog = await chat.forWorkspace(workspace);
+      return catalog.loadModel(model);
+    }
     return chat.loadModel(model);
   };
 }

@@ -6,6 +6,7 @@ export const READ_TOOLS = [
   "get_pipeline", "get_pipeline_run", "summarize_declaration_sample", "list_documents",
   "get_ontology_catalog", "list_ontology_objects", "get_ontology_object", "list_ontology_links",
   "lookup_openfema_declarations", "list_project_files", "read_project_file", "project_diff",
+  "read_document", "get_zenfluence_source", "profile_project_file",
 ] as const;
 const policySchema = z.object({
   scope: z.string().min(1).max(300), actor: z.string().min(1).max(300),

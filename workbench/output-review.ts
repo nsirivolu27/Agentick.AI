@@ -1,6 +1,9 @@
 import type { Role } from "../registry/roles.js";
 import type { BotAttempt } from "./bot-schema.js";
 import type { PipelineRun } from "./pipeline.js";
+import { pendingReviewers } from "./review-proposal.js";
+import { recordedHandoff } from "./handoff-view.js";
+import { reviewBrief, reviewSources, sourceSnapshots } from "./review-brief.js";
 import type { ScheduledJob } from "./scheduler.js";
 import type { StudioUi } from "./studio-view.js";
 import { ago, escape, more, status, type Tone } from "./ui.js";
@@ -64,6 +67,12 @@ export function runNow(run: PipelineRun, options: { jobs?: ScheduledJob[]; attem
   if (run.status === "paused") return { ...base, who: owner, state: { tone: "neutral", label: "Paused" }, action: owner === "You" ? "Resume the run" : `Waiting on ${run.owner}` };
   if (progress.status === "awaiting_review") {
     const count = `${progress.approvals.length} of ${run.requiredApprovals}`;
+    const pending = pendingReviewers(progress);
+    const named = progress.proposal?.reviewers.includes(options.actor) && pending.includes(options.actor);
+    if (progress.proposal) {
+      return { ...base, who: `Proposed to ${progress.proposal.reviewers.join(", ")} · ${count}`, state: { tone: "warn", label: named ? "Proposed to you" : "Awaiting approval" },
+        action: named ? "Your review was requested" : reviewer ? "Review and approve" : pending.length ? `Waiting for ${pending.join(", ")}` : `Waiting for approvals · ${count}` };
+    }
     return { ...base, who: `Independent reviewers · ${count}`, state: { tone: "warn", label: "Awaiting approval" }, action: reviewer ? "Review and approve" : `Waiting for approvals · ${count}` };
   }
   if (stage.assistantId && options.assistantUsable === false) return { ...base, who: owner, state: { tone: "bad", label: "Not connected" }, action: owner === "You" ? "Record the output by hand or fix the assistant" : `Waiting on ${run.owner}` };
@@ -86,6 +95,14 @@ export interface ReviewOptions {
   busy?: boolean;
   /** True when the attempt belongs to the run's current revision, so its result can still be accepted. */
   attemptCurrent?: boolean;
+  /** Members who may sign, when the directory can list them; offered when proposing a handoff. */
+  approvers?: readonly string[];
+}
+
+/** The field that names who a handoff is proposed to. Comma separated IDs; the directory's approvers are offered when known. */
+function reviewersField(options: ReviewOptions, initial: string, label = "Propose to"): string {
+  const list = options.approvers?.length ? `<datalist id="workspace-approvers">${options.approvers.map(approver => `<option value="${escape(approver)}"></option>`).join("")}</datalist>` : "";
+  return `<label class="field"><span>${label}</span><input name="reviewers" list="workspace-approvers" maxlength="1800" value="${escape(initial)}" placeholder="Reviewer IDs, comma separated"></label>${list}<p class="fine">Named reviewers must all approve, on top of the ${options.run.requiredApprovals} required ${options.run.requiredApprovals === 1 ? "approval" : "approvals"}. Leave empty for any independent reviewer.</p>`;
 }
 
 const pill = (state: StageState) => status(state.tone, state.label);
@@ -101,19 +118,20 @@ export function outputReview(options: ReviewOptions): string {
   const job = jobFor(options.jobs, run, stage.id);
 
   // Evidence: what the agent could see, and what it did with it. Nothing here is a claim of correctness.
-  const materials = run.materials ?? [];
+  const materials = reviewSources(run, phase).sources;
   const trail = evidenceTrail(attempt);
   const reads = trail.tools.filter(tool => !tool.blocked).length;
   const checks = attempt?.checks ?? [];
   const evidence = `<div class="review-block" aria-label="Evidence"><h4>Evidence</h4>
-    ${materials.length ? `<ul class="plain">${materials.map(item => `<li>${item.url ? `<a href="${escape(item.url)}" target="_blank" rel="noopener noreferrer">${escape(item.title)} ↗</a>` : escape(item.title)}<small class="text-3"> · ${item.content ? `${item.content.length.toLocaleString("en-US")} characters` : "link only, not fetched"}</small></li>`).join("")}</ul>` : '<p class="text-3">No reference material attached.</p>'}
+    ${materials.length ? `<ul class="plain">${materials.map(item => `<li>${"url" in item && item.url ? `<a href="${escape(item.url)}" target="_blank" rel="noopener noreferrer">${escape(item.title)} ↗</a>` : escape(item.title)}<small class="text-3"> · ${item.content ? `${item.content.length.toLocaleString("en-US")} characters` : "link only, not fetched"}</small></li>`).join("")}</ul>` : '<p class="text-3">No source text captured for this handoff.</p>'}
+    ${sourceSnapshots(run, phase)}
     ${attempt ? `<p class="fine">${trail.reads.length} source ${trail.reads.length === 1 ? "read" : "reads"} · ${reads} tool ${reads === 1 ? "call" : "calls"} · ${checks.length ? checks.every(check => check.passed) ? status("ok", `${checks.length} ${checks.length === 1 ? "check" : "checks"} passed`) : status("bad", `${checks.filter(check => !check.passed).length} of ${checks.length} checks failed`) : "No validation checks recorded"}</p>` : job?.usage ? `<p class="fine">Drafted by ${escape(job.assistant)} on ${escape(job.model)} · ${job.usage.promptTokens} input · ${job.usage.completionTokens} output tokens (reported)</p>` : ""}
     ${attempt ? evidenceTrailHtml(trail) : ""}
     ${phase ? `<p class="fine">Earlier stages: ${run.stages.slice(0, phase).map((item, index) => `${escape(run.config.stages[index]!.name)} ${item.status === "complete" ? "✓" : "○"}`).join(" · ")}</p>` : ""}</div>`;
 
   // Original output: the agent's words, untouched, so an edited handoff can always be compared against them.
   const original = progress.draft ? more("Original agent draft", `<pre class="pre">${escape(progress.draft.text)}</pre>`, true)
-    : attempt?.summary ? more(`Original agent output · ${escape(attempt.status)}`, `<pre class="pre">${escape(attempt.summary)}</pre>`, true)
+    : attempt?.summary ? more(`Original agent output · ${escape(attempt.status)}`, `<pre class="pre">${escape(attempt.summary)}</pre>`, !progress.output)
     : attempt?.error ? `<p class="callout bad" role="status"><strong>No output.</strong>${escape(attempt.error)}</p>`
     : job && (job.status === "failed" || job.status === "cancelled") ? `<p class="callout bad" role="status"><strong>No draft.</strong>${escape(job.error)}</p>`
     : `<p class="text-3">${stage.assistantId || (stage.bot && stage.bot.kind !== "manual") ? "The agent has not produced output for this stage yet." : "This stage is done by hand; there is no agent output."}</p>`;
@@ -125,24 +143,24 @@ export function outputReview(options: ReviewOptions): string {
     const saved = ui?.drafts[key];
     const revision = saved?.expectedRevision ?? String(run.revision);
     const stale = revision !== String(run.revision);
-    return `<form data-review-command="${action}" data-draft="${key}" data-run="${run.id}" data-revision="${escape(revision)}"><label class="field"><span>${action === "request_changes" ? "Change request" : "Revised handoff"}</span><textarea name="note" rows="5" required maxlength="4000">${escape(saved?.note ?? initial)}</textarea></label>${action === "revise" ? `<label class="field"><span>Reason for revision</span><textarea name="reason" required maxlength="4000">${escape(saved?.reason ?? "")}</textarea></label>` : ""}<p class="fine">Earlier approvals do not carry forward. Original text and review history remain in the audit record.</p>${stale ? `<p class="callout warn">This work item changed. Copy your edits, then <button type="button" data-output-reset="${key}">reload the current version</button>.</p>` : ""}<button class="secondary small" type="submit" ${options.busy || stale ? "disabled" : ""}>${label}</button></form>`;
+    return `<form data-review-command="${action}" data-draft="${key}" data-run="${run.id}" data-revision="${escape(revision)}"><label class="field"><span>${action === "request_changes" ? "Change request" : "Revised handoff"}</span><textarea name="note" rows="5" required maxlength="4000">${escape(saved?.note ?? initial)}</textarea></label>${action === "revise" ? `<label class="field"><span>Reason for revision</span><textarea name="reason" required maxlength="4000">${escape(saved?.reason ?? "")}</textarea></label>` : ""}${action === "complete" && stage.approval ? reviewersField(options, saved?.reviewers ?? progress.proposal?.reviewers.join(", ") ?? "") : ""}<p class="fine">Earlier approvals do not carry forward. Original text and review history remain in the audit record.</p>${stale ? `<p class="callout warn">This work item changed. Copy your edits, then <button type="button" data-output-reset="${key}">reload the current version</button>.</p>` : ""}<button class="secondary small" type="submit" ${options.busy || stale ? "disabled" : ""}>${label}</button></form>`;
   };
   let handoff: string;
   if (active && owner && progress.output) {
     handoff = reviewForm("complete", progress.output, "Resubmit for review");
   } else if (progress.output) {
-    handoff = `<p class="fine">Recorded by ${escape(progress.outputBy)}${progress.completedAt ? ` · ${escape(ago(progress.completedAt))}` : ""}</p><pre class="pre">${escape(progress.output)}</pre>`;
+    handoff = `<p class="fine">Recorded by ${escape(progress.outputBy)}${progress.completedAt ? ` · ${escape(ago(progress.completedAt))}` : ""}</p>${recordedHandoff(progress.output, attempt)}`;
   } else if (active && owner && progress.draft) {
     const key = `output:${run.id}:${progress.draft.hash}`;
     const edited = ui?.drafts[key];
     const stale = edited?.expectedRevision && edited.expectedRevision !== String(run.revision);
-    handoff = `<form data-output-review data-draft="${key}" data-run="${run.id}" data-revision="${escape(edited?.expectedRevision ?? String(run.revision))}"><label class="field"><span>Review output</span><textarea name="note" rows="6" required maxlength="4000">${escape(edited?.note ?? progress.draft.text)}</textarea></label><p class="fine">Edit freely; the original draft stays above. Check sources and open questions before handing off.</p>${stale ? `<p class="callout warn" role="alert"><strong>This workflow changed.</strong>Copy any edits you need, then reload the saved draft and review the current context. <button type="button" class="secondary small" data-output-reset="${key}">Reload saved draft</button></p>` : ""}<div class="actions mt8"><button class="primary small" type="submit" ${options.busy ? "disabled" : ""}>${stage.approval ? "Submit for review" : "Complete stage & hand off"}</button>${options.where === "workflows" ? `<a class="quiet small" href="#/desk/${run.id}">Open work item</a>` : ""}</div></form>`;
+    handoff = `<form data-output-review data-draft="${key}" data-run="${run.id}" data-revision="${escape(edited?.expectedRevision ?? String(run.revision))}"><label class="field"><span>Review output</span><textarea name="note" rows="6" required maxlength="4000">${escape(edited?.note ?? progress.draft.text)}</textarea></label><p class="fine">Edit freely; the original draft stays above. Check sources and open questions before handing off.</p>${stage.approval ? reviewersField(options, edited?.reviewers ?? "") : ""}${stale ? `<p class="callout warn" role="alert"><strong>This workflow changed.</strong>Copy any edits you need, then reload the saved draft and review the current context. <button type="button" class="secondary small" data-output-reset="${key}">Reload saved draft</button></p>` : ""}<div class="actions mt8"><button class="primary small" type="submit" ${options.busy ? "disabled" : ""}>${stage.approval ? "Submit for review" : "Complete stage & hand off"}</button>${options.where === "workflows" ? `<a class="quiet small" href="#/desk/${run.id}">Open work item</a>` : ""}</div></form>`;
   } else if (active && job && ["queued", "running"].includes(job.status)) {
     handoff = '<p role="status">Drafting. Review the answer here when it is ready.</p>';
   } else if (active && owner && options.where === "desk" && !options.busy && attempt && options.attemptCurrent && ["ready", "applied"].includes(attempt.status)) {
     handoff = `<p class="text-2">Accept the agent result above to record it as the handoff, or request changes. The accepted output carries its evidence trail.</p>`;
   } else if (active && owner && options.where === "desk" && !options.busy) {
-    handoff = `<form id="pipeline-output"><label class="field"><span>Work completed and supporting evidence</span><textarea name="note" required maxlength="4000" rows="5"></textarea></label><p class="fine">Nothing is recorded until you submit.</p><button class="secondary small">${stage.approval ? "Record and submit for review" : "Record handoff"}</button></form>`;
+    handoff = `<form id="pipeline-output"><label class="field"><span>Work completed and supporting evidence</span><textarea name="note" required maxlength="4000" rows="5"></textarea></label>${stage.approval ? reviewersField(options, "") : ""}<p class="fine">Nothing is recorded until you submit.</p><button class="secondary small">${stage.approval ? "Record and submit for review" : "Record handoff"}</button></form>`;
   } else if (active && owner) {
     handoff = `<p class="text-2">Record the handoff from the <a href="#/desk/${run.id}">work item</a>.</p>`;
   } else if (active) {
@@ -162,15 +180,31 @@ export function outputReview(options: ReviewOptions): string {
   else if (progress.status === "awaiting_review" && current) {
     const eligible = (roles.includes("admin") || roles.includes("approver")) && actor !== run.owner && actor !== progress.outputBy && !progress.approvals.includes(actor);
     const reason = progress.approvals.includes(actor) ? "Your approval is recorded." : actor === run.owner || actor === progress.outputBy ? "The owner and the author of the output cannot approve it." : "An approver or admin approves handoffs.";
-    approval = `${pill({ tone: "warn", label: "Awaiting approval" })}<p class="fine">${progress.approvals.length} of ${run.requiredApprovals} approvals${progress.approvals.length ? ` · ${progress.approvals.map(escape).join(", ")}` : ""}</p>
+    const pending = pendingReviewers(progress);
+    const named = !!progress.proposal && pending.includes(actor);
+    const proposal = progress.proposal ? `<p class="review-proposal"><strong>Proposed to</strong> ${progress.proposal.reviewers.map(reviewer => `<span class="review-named${progress.approvals.includes(reviewer) ? " signed" : ""}">${escape(reviewer)}${progress.approvals.includes(reviewer) ? " ✓" : ""}</span>`).join(" ")}<small class="text-3"> · by ${escape(progress.proposal.by)} · ${escape(ago(progress.proposal.at))}</small></p>` : "";
+    approval = `${pill({ tone: "warn", label: named ? "Proposed to you" : "Awaiting approval" })}${proposal}<p class="fine">${progress.approvals.length} of ${run.requiredApprovals} approvals${progress.approvals.length ? ` · ${progress.approvals.map(escape).join(", ")}` : ""}${pending.length ? ` · still needed from ${pending.map(escape).join(", ")}` : ""}</p>
       ${eligible ? options.where === "desk" ? `<button class="primary" data-pipeline-action="approve" ${options.busy ? "disabled" : ""}>Approve this handoff</button>` : `<a class="primary small" href="#/desk/${run.id}">Review on the work item</a>` : `<p class="text-2">${reason}</p>`}`;
   } else approval = `${pill({ tone: "neutral", label: "Review gate" })}<p class="fine">${run.requiredApprovals} independent approvals after the handoff is submitted.</p>`;
   if (current && progress.status === "awaiting_review" && (roles.includes("admin") || roles.includes("approver")) && actor !== run.owner && actor !== progress.outputBy) {
     approval += more("Request changes", reviewForm("request_changes", "", "Return to author"));
   }
+  // Team review: a named reviewer, the owner or an admin can bring in more reviewers while the handoff waits.
+  const canAddReviewers = current && progress.status === "awaiting_review" && options.where === "desk"
+    && (roles.includes("admin") || (actor === run.owner && roles.includes("author")) || (roles.includes("approver") && !!progress.proposal?.reviewers.includes(actor)));
+  if (canAddReviewers) {
+    const key = `review:${run.id}:${phase}:add_reviewers`;
+    approval += more("Ask more of the team", `<form data-review-command="add_reviewers" data-draft="${key}" data-run="${run.id}" data-revision="${run.revision}">${reviewersField(options, ui?.drafts[key]?.reviewers ?? "", "Also ask")}<label class="field"><span>Why (optional)</span><input name="note" maxlength="4000" value="${escape(ui?.drafts[key]?.note ?? "")}"></label><button class="secondary small" type="submit" ${options.busy ? "disabled" : ""}>Add reviewers</button></form>`);
+  }
+  // Discussion: questions and findings stay with the stage and name the output they were about.
+  const comments = progress.comments ?? [];
+  const open = current && (progress.status === "active" || progress.status === "awaiting_review") && options.where === "desk";
+  const commentKey = `review:${run.id}:${phase}:comment`;
+  const discussion = `<div class="review-discussion"><h5>Discussion · ${comments.length}</h5>${comments.length ? `<ul class="plain review-comments">${comments.map(comment => `<li><p class="fine">${escape(comment.by)} · ${escape(ago(comment.at))}${comment.outputHash && comment.outputHash !== progress.outputHash ? " · earlier output" : ""}</p><p>${escape(comment.text)}</p></li>`).join("")}</ul>` : `<p class="text-3">No comments yet.</p>`}${open ? `<form data-review-command="comment" data-draft="${commentKey}" data-run="${run.id}" data-revision="${run.revision}"><label class="field"><span>Comment</span><textarea name="note" rows="2" required maxlength="4000">${escape(ui?.drafts[commentKey]?.note ?? "")}</textarea></label><button class="quiet small" type="submit" ${options.busy ? "disabled" : ""}>Post comment</button></form>` : ""}</div>`;
+  if (stage.approval) approval += discussion;
   // The audit package is the same facts as this grid, as a file an auditor can keep and verify offline.
   const auditLinks = `<p class="fine audit-links">Audit package: <a href="/api/audit-package?run=${encodeURIComponent(run.id)}&amp;format=markdown" download>Markdown</a> · <a href="/api/audit-package?run=${encodeURIComponent(run.id)}&amp;format=json" download>JSON</a></p>`;
   const approvalBlock = `<div class="review-block" aria-label="Approval"><h4>Approval</h4>${approval}${auditLinks}</div>`;
 
-  return `<div class="review-grid">${evidence}${originalBlock}${handoffBlock}${approvalBlock}</div>`;
+  return `${reviewBrief(run, phase)}<div class="review-grid">${evidence}${originalBlock}${handoffBlock}${approvalBlock}</div>`;
 }

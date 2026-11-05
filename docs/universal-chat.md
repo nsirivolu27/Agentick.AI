@@ -1,5 +1,11 @@
 # Connected chat
 
+For Free-tier scope, setup order and connector completion checks, see the
+[workspace API integration plan](workspace-integrations.md).
+
+For automatic local model selection and connections that survive restarts and
+clones on the same machine, use [the persistent local launcher](local-start.md).
+
 Open **Services → Chat** for general chat or workspace MCP chat, and
 **Services → Models & connections** for model setup.
 
@@ -17,6 +23,31 @@ kept outside the data directory. Back up data and key separately. Encryption doe
 not protect against the server administrator or a compromised running server.
 The browser cannot retrieve saved keys. Disconnect removes that provider from
 future requests; it cannot recall a request already sent.
+
+## Grounded answers and the request budget
+
+Workspace chat decides which reads a question requires before the model sees
+it, from the request itself: a tool the person names (`use
+get_workspace_policy`), and the workspace topics only a read can establish
+(the workflow, the approval policy, the approved agents). Reads that take no
+arguments happen first, on the server. A read that needs arguments must be
+made by the model before it answers; an answer that arrives first is
+corrected once, then refused with the reason ("No answer was accepted: the
+model answered without reading …"). A required read that fails is a refusal
+too, never a guess. Every accepted answer carries its evidence: the required
+reads, and each call with its arguments and the SHA-256 of what came back,
+shown under the answer. Tool results stay untrusted data; grants, call
+limits and membership checks are unchanged.
+
+One budget covers a chat request: model turns and tool calls together.
+`MAGENTIC_CHAT_TIMEOUT_SECONDS` sets it (30 to 3600); the local application
+defaults to 600 seconds because a local model answers on the machine's own
+CPU, the company server to 120. The browser shows the budget, each tool call
+gets at most 30 seconds and never more than what is left, and Stop or a
+dropped connection aborts the provider request. The model selector shows what
+each model proved in this process: "Tool use verified" after a grounded
+answer, "Answered without a required read" after a refusal, or "Tool use not
+measured". Availability is listing; measured tool use is evidence.
 
 ## Ollama and server API setup
 

@@ -84,10 +84,12 @@ export function createBotRuntime(directory: string, pipelines: PipelineEngine, c
     const timer = setTimeout(() => controller.abort(), attempt.bot.timeoutSeconds * 1000);
     try {
       if (!chat) throw new Error("No model configured.");
-      const choices = await untilAborted(chat.modelOptions ? chat.modelOptions()
-        : (chat.listModels ? chat.listModels() : Promise.resolve([chat.model])).then(names => names.map(id => ({ id, available: true }))), controller.signal);
+      // The catalog is bound to this workspace, so a workspace connection resolves here and nowhere else.
+      const catalog = chat.forWorkspace ? await untilAborted(chat.forWorkspace(value.workspaceId), controller.signal) : chat;
+      const choices = await untilAborted(catalog.modelOptions ? catalog.modelOptions()
+        : (catalog.listModels ? catalog.listModels() : Promise.resolve([catalog.model])).then(names => names.map(id => ({ id, available: true }))), controller.signal);
       if (!choices.some(item => item.id === attempt.model && item.available)) throw new Error("Selected model unavailable.");
-      const model = await untilAborted(chat.loadModel(attempt.model, { maxOutputTokens: 1024 }), controller.signal);
+      const model = await untilAborted(catalog.loadModel(attempt.model, { maxOutputTokens: 1024 }), controller.signal);
       // Previous prose can claim success. Only checks recorded for this run
       // and the current tree are presented as command evidence to a model.
       const checked = value.attempts.filter(item => item.runId === run.id && item.checkout === attempt.checkout && item.checkedTree && item.checks.length);

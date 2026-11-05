@@ -11,6 +11,7 @@ import { botResponseFormat } from "./bot-response.js";
 import { BOT_PROFILES } from "./bot-profiles.js";
 import type { PipelineRun } from "./pipeline.js";
 import { listProjectFiles, projectDiff, readProjectFile } from "./bot-project.js";
+import { profileProjectFile } from "./dataset-profile.js";
 import { readToolSession } from "./tool-session.js";
 import { boundStageOutputs } from "./workflow-inputs.js";
 
@@ -54,6 +55,16 @@ export async function runBotWorker(attempt: BotAttempt, run: PipelineRun, model:
     event(content === null ? `Source missing: ${path}` : content.trim() ? `Source read: ${path} (${content.length} characters)` : `Source empty: ${path}`);
     return result({ path, content });
   });
+  if (policy.allowedTools.includes("profile_project_file")) server.registerTool("profile_project_file", { inputSchema: z.object({ path: z.string() }).strict() }, async ({ path }) => {
+    // The profile is computed here, not by the model. It carries the file hash, and the profile text is what reviewers see as evidence.
+    const profile = profileProjectFile(attempt.checkout, path);
+    if (profile === null) { event(`Dataset missing: ${path}`); return result({ path, profile: null }); }
+    const content = JSON.stringify(profile);
+    observed.set(path, content); observeSource?.({ path, content });
+    sourceRead = true; readSources.add(posix.normalize(path));
+    event(`Dataset profiled: ${path} (${profile.rows} rows, ${profile.columns.length} columns, sha256 ${profile.fileSha256.slice(0, 12)})`);
+    return result({ path, profile });
+  });
   const observations: unknown[] = [];
   try {
     await server.connect(serverTransport as unknown as Parameters<typeof server.connect>[0]);
@@ -75,7 +86,7 @@ export async function runBotWorker(attempt: BotAttempt, run: PipelineRun, model:
         attempt.bot.requiredSourcePaths?.length ? `Required source paths: ${JSON.stringify(attempt.bot.requiredSourcePaths)}. Read every named file; another file cannot substitute for a required source.` : "",
         definition.outputContract ? `Output contract for human review: ${definition.outputContract}` : "",
         "Allowed MCP tools for this phase: " + JSON.stringify(policy.allowedTools) + `. Remaining tool calls: ${Math.max(0, policy.maxToolCalls - toolCalls)}.`,
-        "Tool arguments: list_project_files {}, project_diff {}, read_project_file {path}. Only tools in the allowed list may be used. Relative paths only. Read a file before proposing its replacement, including a nonexistent file to verify it is new. read_project_file returns {path, content}; use that content string as the file text. Proposed content must be raw file text, not a JSON or MCP message wrapper. Preserve unrelated text and trailing newlines.",
+        "Tool arguments: list_project_files {}, project_diff {}, read_project_file {path}, profile_project_file {path}. profile_project_file returns computed row counts, column types, ranges and missing values for a .csv, .tsv, .json or .jsonl dataset; report those numbers as computed, never recount rows yourself. Only tools in the allowed list may be used. Relative paths only. Read a file before proposing its replacement, including a nonexistent file to verify it is new. read_project_file returns {path, content}; use that content string as the file text. Proposed content must be raw file text, not a JSON or MCP message wrapper. Preserve unrelated text and trailing newlines.",
         "Return one JSON object without markdown. A tool request is {\"type\":\"tool\",\"name\":\"read_project_file\",\"arguments\":{\"path\":\"src/file.ts\"}}. A final result must use this complete shape: " + JSON.stringify(resultExample) + ". Replace example text with your findings. Each proposed change uses {\"path\":\"src/file.ts\",\"content\":\"Full new file content\"}. Return full UTF-8 content, not patches. At most five small files.",
         attempt.bot.kind === "coder" ? "Changes are proposals only. A person must review and apply them." : "You are read-only. Return an empty changes array.",
         "You cannot execute commands, approve work, send messages, publish, or deploy. Never claim checks passed without recorded check evidence. Your output is not independent human approval.",

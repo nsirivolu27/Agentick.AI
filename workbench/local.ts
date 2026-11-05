@@ -17,7 +17,8 @@ import { createJiraRuntime, type JiraRuntime } from "./jira-runtime.js";
 import type { JiraDelivery } from "./jira.js";
 import { createWorkbenchServer } from "./server.js";
 import { createLocalSession, loadMcpToken, sameSecret, type LocalSession } from "./local-session.js";
-import { chatConfiguration } from "./chat-config.js";
+import { localChatConfiguration } from "./local-chat.js";
+import { chatTimeoutMs } from "./chat.js";
 import { workspaceDirectory } from "./workspace-directory.js";
 import { declarationEvidence } from "./declaration-sample.js";
 import { filePipelines, pipelineCommandSchema, PipelineError, type PipelineEngine } from "./pipeline.js";
@@ -148,7 +149,7 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
       try { readFileSync(path); grants.set(entry.id, loadMcpToken(path)); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
-    const chat = chatConfiguration(true)!;
+    const chat = await localChatConfiguration(dataDir);
     const chatAccess = createChatAccess({ base: chat, managedLogin: !!accounts, plan: loadChatPlan(),
       vault: fileChatVault(join(dataDir, "chat-connections"), setting("MAGENTIC_CONNECTIONS_KEY")), entitled: workspace => billing.tier(workspace) });
     const chatMcpIdentity = (request: import("node:http").IncomingMessage) => chatAccess.authenticateToken(request.headers.authorization?.replace(/^Bearer /, "") ?? "");
@@ -162,6 +163,7 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     });
     const members: MemberDirectory = {
       async rolesFor(id, actor) { return accounts ? accounts.members.find(member => member.workspaceId === id && member.actor === actor)?.roles ?? [] : directory.has(id) && actor === LOCAL_OWNER ? ["author", "admin"] : []; },
+      async approvers(id) { return accounts ? accounts.members.filter(member => member.workspaceId === id && (member.roles.includes("approver") || member.roles.includes("admin"))).map(member => member.actor) : []; },
     };
 
     // The owner authors and administers. They cannot approve their own work:
@@ -185,10 +187,12 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     // when they are bound, when a run starts and when a bot runs.
     const assistants = studioAssistants(studio);
     const engine = filePipelines(workspaceStore, assistantGuards(assistants));
-    bots = createBotRuntime(join(dataDir, "bots"), engine, chat, assistants);
+    // Agents see the server catalog plus each workspace's own administrator connected models, never a member's personal key.
+    const agentChat = chatAccess.agentConfiguration();
+    bots = createBotRuntime(join(dataDir, "bots"), engine, agentChat, assistants);
     const runtime = bots;
     // Tests run the same worker as a workflow agent, against the same attached repository, without touching a run.
-    const agentTests = createAgentTests({ directory: join(dataDir, "agent-tests"), pipelines: engine, bots: runtime, ...(chat ? { chat } : {}) });
+    const agentTests = createAgentTests({ directory: join(dataDir, "agent-tests"), pipelines: engine, bots: runtime, chat: agentChat });
     for (const entry of directory.list().workspaces) runtime.snapshot(entry.id);
     const pipelines: PipelineEngine = {
       snapshot: engine.snapshot,
@@ -211,7 +215,7 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     for (const entry of directory.list().workspaces) await jiraRuntime.recover(entry.id);
     // Assistants draft their workflow stages in the background. Jobs live
     // beside the bot timelines; a job interrupted by a restart is failed, not resumed.
-    const scheduler = createScheduler({ pipelines, assistants, loadModel: chatModelLoader(chat), persistence: fileSchedulePersistence(join(dataDir, "schedule")) });
+    const scheduler = createScheduler({ pipelines, assistants, loadModel: chatModelLoader(agentChat), persistence: fileSchedulePersistence(join(dataDir, "schedule")) });
     // Projects learn from new files in the import folder on their own rhythm.
     const importDirectory = setting("MAGENTIC_STUDIO_IMPORT_DIR")?.trim() || join(dataDir, "model-studio", "import");
     const learning = createLearningSchedule({ studio, imports: folderImports(importDirectory), persistence: fileLearningPersistence(join(dataDir, "learning")), requiredApprovals: context.workflow.requiredApprovals });
@@ -225,7 +229,8 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     }, 30_000);
     ticker.unref();
     server = createWorkbenchServer({
-      context, billing, chatAccess, ...(accounts ? { accounts } : {}),
+      // Local models answer on the machine's own CPU; ten minutes is the default budget here, two on the company server.
+      context, billing, chatAccess, chatTimeoutMs: chatTimeoutMs(setting, 600), ...(accounts ? { accounts } : {}),
       assets: assets(),
       pipelines, bots: runtime, jira: jiraRuntime, ontology, zenfluence, studio, scheduler, learning, documents, agentTests,
       guard: session.guard,

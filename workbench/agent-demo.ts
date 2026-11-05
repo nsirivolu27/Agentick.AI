@@ -12,10 +12,12 @@ import { createDeclarationDemo } from "./openfema-demo.js";
 import { filePipelines } from "./pipeline.js";
 import { analystPersistence } from "./analyst-persistence.js";
 import { createAnalystRuntime } from "./analyst-runtime.js";
+import { createSystemDemo } from "./system-demo.js";
 
 const declarations = process.argv.includes("--openfema");
 const live = process.argv.includes("--live");
-if ((live && declarations) || process.argv.slice(2).some(arg => !["--live", "--openfema"].includes(arg))) throw new Error("Choose --openfema for the evidence workflow, --live for Ollama, or no arguments for the scripted SOP.");
+const system = process.argv.includes("--system");
+if ([live, declarations, system].filter(Boolean).length > 1 || process.argv.slice(2).some(arg => !["--live", "--openfema", "--system"].includes(arg))) throw new Error("Choose --system for the full workflow, --openfema for the analyst, --live for Ollama, or no arguments for the scripted SOP.");
 let chat: ChatConfiguration = scriptedDemoChat();
 if (live) {
   const base = new URL(setting("MAGENTIC_LLM_BASE_URL") ?? "http://127.0.0.1:11434");
@@ -37,7 +39,7 @@ const output = fileURLToPath(new URL("./", import.meta.url));
 // The demo owns disposable repositories; company state keeps its configured path.
 const directory = mkdtempSync(join(tmpdir(), "agentick-demo-"));
 const saved = declarations ? analystPersistence(setting("AGENTICK_ANALYST_DIRECTORY") ?? fileURLToPath(new URL("../../.magentic-dev/openfema/", import.meta.url))) : undefined;
-const demo = declarations
+const demo = system ? await createSystemDemo(directory, readFileSync(join(output, "virginia-snapshot.json"), "utf8")) : declarations
   ? await createDeclarationDemo(readFileSync(join(output, "virginia-snapshot.json"), "utf8"), filePipelines(saved!.pipelines))
   : await createAgentDemo(directory, chat);
 const analyst = "runId" in demo ? createAnalystRuntime({
@@ -53,7 +55,7 @@ for (const file of readdirSync(output)) {
   if (file === "index.html") {
     body = body.toString().replace(/<select id="identity">[\s\S]*?<\/select>/,
       `<select id="identity">${DEMO_MEMBERS.map((member, index) => `<option value="${member.actor}">${index ? `Reviewer ${index}` : "Operator"}</option>`).join("")}</select>`)
-      .replace("<body", `<body data-agent-demo="${declarations ? "openfema" : live ? "live" : "scripted"}"`);
+      .replace("<body", `<body data-agent-demo="${system ? "system" : declarations ? "openfema" : live ? "live" : "scripted"}"`);
   }
   assets.set(file === "index.html" ? "/" : `/${file}`, { body, type: types[extname(file)]! });
 }
@@ -81,6 +83,11 @@ async function close() {
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => { void close(); });
 process.on("message", message => { if ((message as { type?: string })?.type === "shutdown") void close().then(() => process.disconnect?.()); });
 server.listen(port, "127.0.0.1", () => {
+  if (system) {
+    console.log(`System demo: ${origin}/#/demo`);
+    console.log("Real MCP reads and review controls · scripted responses · saved OpenFEMA snapshot · synthetic reviewers");
+    return;
+  }
   if ("runId" in demo) {
     console.log(`OpenFEMA analyst: ${origin}/#/analyst`);
     console.log("Real public records · offline Foundry replay · rule-based analyst · demo reviewers");

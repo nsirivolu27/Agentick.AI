@@ -107,11 +107,13 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
   /** Everything a test needs before a model is loaded, each refusal naming the fix. */
   async function readiness(workspace: string, agent: AgentConfigurable, testCase: AgentTestCase): Promise<{ checkout: string }> {
     if (!options.chat) throw new PipelineError(409, "No model provider is configured for workflow agents. Connect one, then run the test.");
-    const choices = options.chat.modelOptions ? await options.chat.modelOptions()
-      : (options.chat.listModels ? await options.chat.listModels() : [options.chat.model]).map(id => ({ id, available: true }));
+    // The workspace catalog adds the workspace's own connections, so an agent on one of those models is ready here too.
+    const catalog = options.chat.forWorkspace ? await options.chat.forWorkspace(workspace) : options.chat;
+    const choices = catalog.modelOptions ? await catalog.modelOptions()
+      : (catalog.listModels ? await catalog.listModels() : [catalog.model]).map(id => ({ id, available: true }));
     if (!choices.some(item => item.id === agent.model && item.available)) throw new PipelineError(409, `The model "${agent.model}" is not connected. Choose an available model in Knowledge and tools, save, then run the test.`);
     const policy = effectiveToolPolicy(agent.bot);
-    if (agent.bot.requireSourceRead && !policy.allowedTools.includes("read_project_file")) throw new PipelineError(409, "Required source reading needs the read file tool. Choose it in Knowledge and tools.");
+    if (agent.bot.requireSourceRead && !policy.allowedTools.some(tool => tool === "read_project_file" || tool === "profile_project_file")) throw new PipelineError(409, "Required source reading needs the read file tool. Choose it in Knowledge and tools.");
     const project = options.bots.snapshot(workspace).project;
     if (!project) throw new PipelineError(409, "No repository is attached, so the agent has nothing to read. Attach one from Work items, then run the test.");
     if (testCase.source) {
@@ -144,7 +146,8 @@ export function createAgentTests(options: AgentTestsOptions): AgentTestsEngine {
       checkout, baseCommit: "test", startedAt: run.startedAt, status: "running", summary: "", error: "", calls: 0, tokenUsage: null, cost: null, events: [], changes: [], proposalHash: "", checks: [], checkedTree: "" });
     const note = (message: string) => { run.events = [...run.events.slice(-59), message.slice(0, 500)]; save(value); };
     try {
-      const model = await untilAborted(options.chat!.loadModel(agent.model, { maxOutputTokens: 1024 }), controller.signal);
+      const catalog = options.chat!.forWorkspace ? await untilAborted(options.chat!.forWorkspace(value.workspaceId), controller.signal) : options.chat!;
+      const model = await untilAborted(catalog.loadModel(agent.model, { maxOutputTokens: 1024 }), controller.signal);
       const result = await runBotWorker(attempt, trialRun(value.workspaceId, run.startedBy, agent, testCase), model, controller.signal, note, [], undefined, source => {
         const sha256 = digest(source.content);
         if (!run.evidence!.some(item => item.path === source.path && item.sha256 === sha256)) {

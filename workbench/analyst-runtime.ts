@@ -30,6 +30,8 @@ export interface AnalystJob {
   id: string; runId: string; workspaceId: string; owner: string; request: Request;
   status: "queued" | "running" | "failed" | "cancelled" | "blocked" | "completed";
   attempt: number; createdAt: string; updatedAt: string; error: string | null;
+  /** Evidence-only report; submission and approval still belong to the pipeline. */
+  report?: string;
   result: "matched" | "limited" | null; trace: AnalystTrace[];
   sources: { title: string; url: string; retrievedAt: string; hash: string; rows: number;
     declarations: number; mode: "saved-snapshot" | "live-openfema"; excerpt: string; content: string }[];
@@ -212,6 +214,7 @@ export function createAnalystRuntime(options: {
       const currentRoles = await options.authorize(job.workspaceId, job.owner);
       if (!currentRoles.some(role => role === "author" || role === "admin")) throw new PermissionError("Execution membership revoked.");
       signal.throwIfAborted();
+      job.report = text;
       if (live) {
         // The existing company layer freezes the Foundry-verified declaration
         // sample. Do not disguise fresh records as already-verified material,
@@ -274,7 +277,7 @@ export function createAnalystRuntime(options: {
         const run = options.pipelines.snapshot(workspace).runs.find(run => run.id === job.runId);
         if (!run || run.status !== "running" || run.stages[0]?.status !== "active") throw new PipelineError(409, "This handoff is no longer editable.");
         await tasks.get(job.id);
-        job.status = "queued"; job.attempt++; job.error = null; save(); enqueue(job);
+        job.status = "queued"; job.attempt++; job.error = null; delete job.report; save(); enqueue(job);
       }
       return structuredClone(job);
     },

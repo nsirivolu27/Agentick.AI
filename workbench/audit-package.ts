@@ -33,6 +33,9 @@ export const auditStageSchema = z.object({
   draft: z.object({ text: z.string(), hash: z.string(), by: z.string(), at: z.string() }).strict().optional(),
   outputVersion: z.number().int().min(1).optional(), sourceHash: z.string().regex(hashPattern).optional(),
   approvalRecords: z.array(approvalRecordSchema).optional(), revisions: z.array(outputRevisionSchema).optional(),
+  /** Who the handoff was proposed to, and the discussion that stayed with the stage. Present only when used. */
+  proposal: z.object({ by: z.string(), at: z.string(), reviewers: z.array(z.string()), outputHash: z.string() }).strict().optional(),
+  comments: z.array(z.object({ id: z.string(), by: z.string(), at: z.string(), text: z.string(), outputHash: z.string() }).strict()).optional(),
 }).strict();
 const activitySchema = z.object({
   executionId: z.string(), runId: z.string(), kind: z.enum(["worker", "analyst"]), status: z.string(),
@@ -90,6 +93,8 @@ export function buildAuditPackage(run: PipelineRun, options: { workspaceId: stri
       ...(stage.draft ? { draft: { text: stage.draft.text, hash: stage.draft.hash, by: stage.draft.by, at: stage.draft.at } } : {}),
       ...(stage.outputVersion ? { outputVersion: stage.outputVersion, sourceHash: stage.sourceHash,
         approvalRecords: structuredClone(stage.approvalRecords ?? []), revisions: structuredClone(stage.revisions ?? []) } : {}),
+      ...(stage.proposal ? { proposal: structuredClone(stage.proposal) } : {}),
+      ...(stage.comments?.length ? { comments: structuredClone(stage.comments) } : {}),
     })),
     events: run.events.map(event => ({ at: event.at, actor: event.actor, stage: event.stage, action: event.action, detail: event.detail })),
     materials: [...(run.workflowSource ? [run.workflowSource] : []), ...(run.materials ?? [])].map(material => ({ title: material.title, ...(material.url ? { url: material.url } : {}), content: material.content, contentHash: sha256(material.content) })),
@@ -151,6 +156,10 @@ export function verifyAuditPackage(raw: unknown): Verification {
       if (signer === stage.outputBy) problems.push(`${where}: the output author ${signer} appears as a signer.`);
     }
     if (stage.status === "complete" && stage.gate && stage.approvals.length < pkg.run.requiredApprovals) problems.push(`${where}: completed with ${stage.approvals.length} of ${pkg.run.requiredApprovals} required approvals.`);
+    if (stage.status === "complete" && stage.proposal) {
+      const unsigned = stage.proposal.reviewers.filter(reviewer => !stage.approvals.includes(reviewer));
+      if (unsigned.length) problems.push(`${where}: completed without the named reviewer${unsigned.length === 1 ? "" : "s"} ${unsigned.join(", ")}.`);
+    }
     if (stage.approvals.length && !pkg.events.some(event => event.action === "approved" && event.detail.includes(stage.outputHash))) problems.push(`${where}: no approval event names the output hash.`);
   }
   pkg.materials.forEach((material, index) => {
@@ -184,7 +193,9 @@ export function renderAuditPackage(pkg: AuditPackage): string {
     if (stage.draft) out.push(`Draft by ${stage.draft.by} at ${stage.draft.at}, hash ${stage.draft.hash}.`);
     if (stage.output) {
       out.push(`Output by ${stage.outputBy}, hash ${stage.outputHash}.`);
+      if (stage.proposal) out.push(`Proposed to ${stage.proposal.reviewers.join(", ")} by ${stage.proposal.by} at ${stage.proposal.at}.`);
       out.push(`Signed by: ${stage.approvals.length ? stage.approvals.join(", ") : "nobody yet"}.`, "");
+      for (const comment of stage.comments ?? []) out.push(`Comment by ${comment.by} at ${comment.at}: ${comment.text}`);
       out.push("```", stage.output, "```");
     } else out.push("No output yet.");
     if (stage.sourceHash) out.push(`Output revision ${stage.outputVersion}; frozen source hash ${stage.sourceHash}.`);

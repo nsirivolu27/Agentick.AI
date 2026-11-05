@@ -43,14 +43,26 @@ export const pipelineSchema = z.object({
 export type PipelineConfig = z.infer<typeof pipelineSchema>;
 /** The starting workflow. Defined with the other templates so the browser can read it without Node modules. */
 import { DEVELOPMENT_WORKFLOW } from "./workflow-templates.js";
+import { pendingReviewers } from "./review-proposal.js";
+export { pendingReviewers } from "./review-proposal.js";
 export const DEFAULT_PIPELINE: PipelineConfig = DEVELOPMENT_WORKFLOW;
+export const MAX_REVIEWERS = 8;
+const uniqueReviewers = (reviewers: string[]) => new Set(reviewers).size === reviewers.length;
+const reviewerList = z.array(z.string().trim().min(1).max(200)).max(MAX_REVIEWERS);
+const reviewersSchema = reviewerList.refine(uniqueReviewers, "Each reviewer is named once.");
 export const pipelineCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("configure"), expectedVersion: z.number().int().min(1), config: pipelineSchema }).strict(),
   z.object({ action: z.literal("start"), requestId: z.string().uuid(), title: z.string().trim().min(3).max(160), brief: text,
     expectedVersion: z.number().int().min(1).optional(), configurableId: z.string().uuid().optional(),
     materials: materialsSchema.optional(), issueKey: z.string().regex(/^[A-Z][A-Z0-9]{1,19}-[1-9][0-9]*$/).optional() }).strict(),
   z.object({ action: z.enum(["complete", "approve", "pause", "resume", "block", "retry", "cancel"]),
-    runId: z.string().uuid(), expectedRevision: z.number().int().min(1), note: text.optional() }).strict(),
+    runId: z.string().uuid(), expectedRevision: z.number().int().min(1), note: text.optional(),
+    /** Only with "complete": the people this handoff is proposed to. They must all sign before the stage completes. */
+    reviewers: reviewersSchema.optional() }).strict(),
+  /** A note on the stage under review: a question, a finding, or the author's reply. It changes nothing else. */
+  z.object({ action: z.literal("comment"), runId: z.string().uuid(), expectedRevision: z.number().int().min(1), note: text }).strict(),
+  /** A named reviewer, the owner or an admin brings more of the team into the review. */
+  z.object({ action: z.literal("add_reviewers"), runId: z.string().uuid(), expectedRevision: z.number().int().min(1), reviewers: reviewerList.min(1).refine(uniqueReviewers, "Each reviewer is named once."), note: text.optional() }).strict(),
   /** Replace the reference material a running workflow carries. The owner or an admin; the run keeps its own frozen copy. */
   z.object({ action: z.literal("materials"), runId: z.string().uuid(), expectedRevision: z.number().int().min(1), materials: materialsSchema }).strict(),
   z.object({ action: z.literal("request_changes"), runId: z.string().uuid(), expectedRevision: z.number().int().min(1), note: text }).strict(),
@@ -62,10 +74,13 @@ export interface JiraPreview { id: string; eventId: string; action: "create_issu
   issueKey: string | null; summary: string; status: string; comment: string; delivery: "preview" }
 /** What an assistant prepared for a stage. A person turns it into the stage's output, or ignores it. */
 export interface StageDraft { text: string; hash: string; by: string; jobId: string; at: string }
+/** Who the handoff was proposed to. The required approval count still applies; every named reviewer must also sign. */
+export interface ReviewProposal { by: string; at: string; reviewers: string[]; outputHash: string }
+export interface StageComment { id: string; by: string; at: string; text: string; outputHash: string }
 export interface StageRun { status: "pending" | "active" | "awaiting_review" | "complete"; output: string; outputHash: string;
   outputBy: string; approvals: string[]; completedAt?: string; draft?: StageDraft;
   outputVersion?: number; sourceHash?: string; approvalRecords?: ApprovalRecord[]; revisions?: OutputRevision[];
-  executionSources?: ReviewSource[] }
+  executionSources?: ReviewSource[]; proposal?: ReviewProposal; comments?: StageComment[] }
 export interface PipelineRun {
   id: string; requestId: string; workspaceId: string; owner: string; title: string; brief: string; issueKey: string | null;
   config: PipelineConfig; version: number; revision: number; requiredApprovals: number; createdAt: string; updatedAt: string;
@@ -74,6 +89,10 @@ export interface PipelineRun {
   sourceHistory?: Record<string, ReviewSource[]>;
 }
 
+function checkReviewers(run: PipelineRun, stage: StageRun, reviewers: readonly string[]): void {
+  if (reviewers.length > MAX_REVIEWERS) throw new PipelineError(400, `Name at most ${MAX_REVIEWERS} reviewers.`);
+  if (reviewers.includes(run.owner) || reviewers.includes(stage.outputBy)) throw new PipelineError(400, "The run owner and the output author cannot be named as reviewers of their own handoff.");
+}
 function currentSources(run: PipelineRun): ReviewSource[] {
   return [...(run.workflowSource ? [run.workflowSource] : []), ...(run.materials ?? []), ...(run.stages[run.current]?.executionSources ?? [])];
 }
@@ -271,6 +290,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       if (run.status === "complete" || run.status === "cancelled") throw new PipelineError(409, "This run is closed.");
       if (run.events.length >= 500) throw new PipelineError(409, "This run reached its event limit. Start a new run.");
       const stage = run.stages[run.current]!;
+      if ("reviewers" in input && input.reviewers && input.action !== "complete" && input.action !== "add_reviewers") throw new PipelineError(400, "Reviewers are named when submitting for review.");
       if (input.action === "approve") {
         if (!admin && !roles.includes("approver")) throw new PipelineError(403, "A reviewer must approve this handoff.");
         if (actor === stage.outputBy || actor === run.owner) throw new PipelineError(403, "The run owner and output author cannot approve this handoff.");
@@ -284,13 +304,26 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
         (run.sourceHistory ??= {})[sourceHash] ??= structuredClone(currentSources(run));
         (stage.approvalRecords ??= []).push({ actor, at: new Date().toISOString(), version: stage.outputVersion, outputHash: stage.outputHash, sourceHash });
         stage.approvals.push(actor); event(run, actor, "approved", `Approved output ${stage.outputHash}.`);
-        if (stage.approvals.length >= run.requiredApprovals) advance(run, actor);
+        if (stage.approvals.length >= run.requiredApprovals && !pendingReviewers(stage).length) advance(run, actor);
       } else if (input.action === "request_changes") {
         if ((!admin && !roles.includes("approver")) || actor === run.owner || actor === stage.outputBy) throw new PipelineError(403, "An independent reviewer must request changes.");
         if (run.status !== "running" || stage.status !== "awaiting_review") throw new PipelineError(409, "This stage is not awaiting review.");
         recordOutputRevision(run, actor, stage.output, input.note, "changes_requested");
         stage.status = "active";
         event(run, actor, "changes_requested", input.note);
+      } else if (input.action === "comment") {
+        if (run.status !== "running" || (stage.status !== "active" && stage.status !== "awaiting_review")) throw new PipelineError(409, "Comments go on the open stage of a running work item.");
+        if ((stage.comments?.length ?? 0) >= 200) throw new PipelineError(409, "This stage reached its comment limit.");
+        (stage.comments ??= []).push({ id: randomUUID(), by: actor, at: new Date().toISOString(), text: input.note, outputHash: stage.outputHash });
+        event(run, actor, "comment", input.note);
+      } else if (input.action === "add_reviewers") {
+        const named = stage.proposal?.reviewers.includes(actor) && roles.includes("approver");
+        if (!admin && !named && !(actor === run.owner && roles.includes("author"))) throw new PipelineError(403, "A named reviewer, the run owner or an admin adds reviewers.");
+        if (run.status !== "running" || stage.status !== "awaiting_review") throw new PipelineError(409, "Reviewers are added while the handoff awaits review.");
+        const reviewers = [...new Set([...(stage.proposal?.reviewers ?? []), ...input.reviewers])];
+        checkReviewers(run, stage, reviewers);
+        stage.proposal = { by: stage.proposal?.by ?? actor, at: stage.proposal?.at ?? new Date().toISOString(), reviewers, outputHash: stage.outputHash };
+        event(run, actor, "reviewers_added", `${input.reviewers.join(", ")} asked to review.${input.note ? ` ${input.note}` : ""}`);
       } else {
         if (!admin && (actor !== run.owner || !roles.includes("author"))) throw new PipelineError(403, "The run owner or an admin must perform this action.");
         if (input.action === "materials") {
@@ -317,10 +350,17 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
             if (sources.some(source => source.sha256 !== outputDigest(source.content))) throw new PipelineError(409, "Execution source content does not match its recorded hash.");
             stage.executionSources = sources;
           }
+          if (input.reviewers?.length && !run.config.stages[run.current]!.approval) throw new PipelineError(409, "This stage has no review gate, so there is nobody to propose it to.");
+          // A resubmission goes back to the same people unless the author names others.
+          const reviewers = input.reviewers ?? stage.proposal?.reviewers ?? [];
+          checkReviewers(run, { ...stage, outputBy: actor }, reviewers);
           recordOutputRevision(run, actor, input.note, stage.output ? "Resubmitted for review." : "Initial handoff.", "submitted");
           stage.outputBy = actor;
-          if (run.config.stages[run.current]!.approval) { stage.status = "awaiting_review"; event(run, actor, "review_requested", input.note); }
-          else advance(run, actor);
+          if (run.config.stages[run.current]!.approval) {
+            stage.status = "awaiting_review"; event(run, actor, "review_requested", input.note);
+            if (reviewers.length) { stage.proposal = { by: actor, at: new Date().toISOString(), reviewers, outputHash: stage.outputHash }; event(run, actor, "proposed", `Proposed to ${reviewers.join(", ")}.`); }
+            else delete stage.proposal;
+          } else advance(run, actor);
         } else if (input.action === "pause" && run.status === "running") { run.status = "paused"; event(run, actor, "paused", input.note ?? "Run paused."); }
         else if (input.action === "resume" && run.status === "paused") { run.status = "running"; event(run, actor, "resumed", "Run resumed."); }
         else if (input.action === "block" && run.status === "running" && stage.status === "active") {
