@@ -1,3 +1,4 @@
+import { ontologyPage, type OntologyPreview } from "./ontology-view.js";
 import { createZenfluenceView } from "./zenfluence-controller.js";
 import type { SavedChat, SavedChatSummary } from "./chat-history.js";
 import { createWorkflowCanvas } from "./workflow-canvas-controller.js";
@@ -7,6 +8,13 @@ import { installWorkforceAgents, workforceTemplates } from "./workforce-marketpl
 import { chatConnectionsPage, type ConnectionFeedback } from "./chat-connections-view.js";
 import type { ChatAccessSummary } from "./chat-access.js";
 import { accountPage, type AccountSummary } from "./account-view.js";
+import { workspaceSetupPage } from "./workspace-setup.js";
+import { workspaceConsole, workspaceTab } from "./workspace-console.js";
+import { workspaceServiceView } from "./workspace-services.js";
+import { createCompanyTeamView } from "./company-team-controller.js";
+import type { CompanyTeamReport } from "./company-team.js";
+import type { SlackPreview, SlackReceipt } from "./slack.js";
+import type { DeploymentReport } from "./deployment-report.js";
 import type { OntologyCatalog } from "./ontology.js";
 import { contextMessages } from "./chat-settings.js";
 import type { RegistryRecord } from "../registry/record.js";
@@ -36,7 +44,7 @@ import { type BotSnapshot } from "./bot-schema.js";
 import { DEVELOPMENT_PLAYBOOKS, playbookBrief, type SessionDraft } from "./playbooks.js";
 import type { SessionFilter } from "./desk-view.js";
 import { workspaceView, workList, workProgress } from "./workspace-view.js";
-import { materialsSchema, FEDERAL_SERVICE_STARTER, type Material } from "./materials.js";
+import { materialSchema, materialsSchema, FEDERAL_SERVICE_STARTER, type Material } from "./materials.js";
 import { configureStage } from "./guided-stages.js";
 import { jiraReviewView, jiraHistoryView, type JiraReview, type JiraHistory } from "./jira-view.js";
 import { pipelineView } from "./pipeline-view.js";
@@ -45,7 +53,7 @@ import { emptyStudioUi, studioListPage, studioProjectPage, type Page, type Studi
 import { documentsPage } from "./documents-view.js";
 import { activityPage, approvalDetailPage, approvalsQueuePage, evaluationDetailPage, evaluationsListPage } from "./review-views.js";
 import { assistantDetailPage, assistantsListPage, WORKSPACE_ASSISTANT } from "./assistants-view.js";
-import { homeView, navCounts } from "./home-view.js";
+import { navCounts } from "./home-view.js";
 import { mountOperationsQueue } from "./operations-queue.js";
 import type { Root } from "react-dom/client";
 import { workflowPage } from "./workflow-view.js";
@@ -53,6 +61,7 @@ import { WORKFLOW_TEMPLATES } from "./workflow-templates.js";
 import { hint, setHints } from "./ui.js";
 import type { StudioSnapshot } from "./studio/engine.js";
 import type { WorkbenchSnapshot } from "./snapshot.js";
+import { handlingBannerHtml } from "./handling-marking.js";
 
 type RecordView = WorkbenchSnapshot["records"][number];
 type Snapshot = WorkbenchSnapshot;
@@ -65,6 +74,11 @@ let workspaceList: import("./workspace-directory.js").WorkspaceListing | undefin
 let workspaceRequestId = crypto.randomUUID();
 let refreshVersion = 0;
 let snapshot: Snapshot;
+let slackPreview: SlackPreview | undefined;
+let slackScope = "";
+const companyTeam = createCompanyTeamView({
+  request: workspace => api("/api/company-team", undefined, workspace) as Promise<CompanyTeamReport>, render,
+});
 let chatAccess: ChatAccessSummary | undefined;
 let chatAccessError = "";
 let connectionFeedback: ConnectionFeedback | undefined;
@@ -82,76 +96,69 @@ let billingOpening = false;
 let operationsRoot: Root | undefined;
 let filter = "all";
 node(".skip-link").addEventListener("click", event => { event.preventDefault(); node("main").focus(); });
-const servicesDialog = node<HTMLDialogElement>("#workspace-navigation");
+const mobileNavigation = window.matchMedia("(max-width: 800px)");
+let navigationTrigger = node("#nav-toggle");
 function closeNavigation(): void {
-  if (servicesDialog.open) servicesDialog.close();
-}
-node("#nav-toggle").addEventListener("click", () => {
-  filterServices();
-  servicesDialog.showModal();
-  document.body.classList.add("navigation-open");
-  node("#nav-toggle").setAttribute("aria-expanded", "true");
-  node("#service-search").focus();
-});
-node("#nav-close").addEventListener("click", closeNavigation);
-servicesDialog.addEventListener("keydown", event => {
-  // Search inputs may otherwise consume Escape to clear their value instead
-  // of dismissing the modal. Keep dismissal consistent for keyboard users.
-  if (event.key === "Escape") { event.preventDefault(); closeNavigation(); }
-});
-servicesDialog.addEventListener("close", () => {
   document.body.classList.remove("navigation-open");
+  node("#workspace-navigation").removeAttribute("role");
+  node("#workspace-navigation").removeAttribute("aria-modal");
   node("#nav-toggle").setAttribute("aria-expanded", "false");
-  node("#nav-toggle").focus();
+  node("#service-search-launcher").setAttribute("aria-expanded", "false");
+  node("#nav-backdrop").hidden = true;
+  node("main").inert = false;
+}
+function openNavigation(trigger: HTMLElement): void {
+  navigationTrigger = trigger;
+  document.body.classList.add("navigation-open");
+  node("#workspace-navigation").setAttribute("role", "dialog");
+  node("#workspace-navigation").setAttribute("aria-modal", "true");
+  node("#nav-toggle").setAttribute("aria-expanded", "true");
+  node("#service-search-launcher").setAttribute("aria-expanded", "true");
+  node("#nav-backdrop").hidden = false;
+  node("main").inert = true;
+  filterServices();
+  node<HTMLInputElement>("#service-search").focus();
+}
+for (const id of ["#nav-toggle", "#service-search-launcher"]) node(id).addEventListener("click", () => openNavigation(node(id)));
+for (const id of ["#nav-close", "#nav-backdrop"]) node(id).addEventListener("click", () => {
+  closeNavigation(); navigationTrigger.focus();
 });
-servicesDialog.addEventListener("click", event => {
-  if ((event.target as Element).closest("a.nav")) closeNavigation();
-  const rect = servicesDialog.getBoundingClientRect();
-  if (event.target === servicesDialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) closeNavigation();
+node("#workspace-navigation").addEventListener("click", event => {
+  if ((event.target as Element).closest("a.nav, a.brand")) closeNavigation();
 });
+node("#workspace-navigation").addEventListener("keydown", event => {
+  if (!document.body.classList.contains("navigation-open")) return;
+  if (event.key === "Escape") { closeNavigation(); navigationTrigger.focus(); return; }
+  if (event.key !== "Tab") return;
+  const controls = [...node("#workspace-navigation").querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), summary')]
+    .filter(control => control.offsetParent !== null);
+  const first = controls[0], last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first && last) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last && first) { event.preventDefault(); first.focus(); }
+});
+mobileNavigation.addEventListener("change", () => closeNavigation());
 function filterServices(): void {
   const query = node<HTMLInputElement>("#service-search").value.trim().toLowerCase();
-  let any = false;
-  for (const group of servicesDialog.querySelectorAll<HTMLElement>(".service-group")) {
-    let visible = false;
-    for (const link of group.querySelectorAll<HTMLElement>("a.nav")) {
-      const matches = `${group.querySelector("h3")?.textContent} ${link.textContent}`.toLowerCase().includes(query);
-      link.hidden = !matches || (link.id === "company-navigation" && !companyMode);
-      visible ||= !link.hidden;
-    }
-    group.hidden = !visible;
-    any ||= visible;
-  }
-  node("#service-empty").hidden = any;
+  let matches = 0;
+  document.querySelectorAll<HTMLElement>(".service-group").forEach(group => {
+    let visible = 0;
+    group.querySelectorAll<HTMLAnchorElement>("a.nav").forEach(link => {
+      // Permission-hidden links stay hidden when the search is cleared.
+      const match = !link.hidden && (link.textContent ?? "").toLowerCase().includes(query);
+      link.dataset.searchHidden = String(!match);
+      if (match) visible++;
+    });
+    group.dataset.searchHidden = String(visible === 0);
+    matches += visible;
+  });
+  node("#service-results").textContent = query ? matches ? matches + " services found" : "No services found. Try agents, models or workflow." : "";
+  node("#service-search-clear").hidden = !query;
 }
 node("#service-search").addEventListener("input", filterServices);
-const workspacePicker = node<HTMLDialogElement>("#workspace-picker");
-node("#workspace-picker-toggle").addEventListener("click", () => workspacePicker.showModal());
-node("#workspace-picker-close").addEventListener("click", () => workspacePicker.close());
-workspacePicker.addEventListener("change", event => {
-  if ((event.target as HTMLElement).id === "workspace-select") workspacePicker.close();
-});
-const accountMenu = node<HTMLDetailsElement>(".console-account");
-document.addEventListener("click", event => {
-  if (!accountMenu.contains(event.target as Node)) accountMenu.open = false;
-});
-accountMenu.addEventListener("keydown", event => {
-  if (event.key === "Escape") { accountMenu.open = false; accountMenu.querySelector("summary")?.focus(); }
-});
-const themeSelect = node<HTMLSelectElement>("#theme-select");
-const systemTheme = window.matchMedia("(prefers-color-scheme: light)");
-function applyTheme(): void {
-  document.documentElement.dataset.theme = themeSelect.value === "system" ? (systemTheme.matches ? "light" : "dark") : themeSelect.value;
-}
-try {
-  const saved = localStorage.getItem("magentic.theme");
-  if (saved && ["light", "dark", "system"].includes(saved)) themeSelect.value = saved;
-} catch { /* Appearance is a browser preference, never a credential. */ }
-applyTheme();
-systemTheme.addEventListener("change", applyTheme);
-themeSelect.addEventListener("change", () => {
-  applyTheme();
-  try { localStorage.setItem("magentic.theme", themeSelect.value); } catch { /* Storage may be blocked. */ }
+node("#service-search-clear").addEventListener("click", () => {
+  node<HTMLInputElement>("#service-search").value = "";
+  filterServices();
+  node("#service-search").focus();
 });
 /**
  * Routing.
@@ -162,12 +169,13 @@ themeSelect.addEventListener("change", () => {
  * the back button, a reload and a pasted link all land in the same place.
  */
 interface Route { view: string; id?: string; sub?: string; query: URLSearchParams }
-const PRIMARY_VIEWS = ["zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
+const PRIMARY_VIEWS = ["ontology", "deployments", "onboarding", "zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
 const LEGACY_VIEWS = ["desk", "pipelines", "agents", "email", "mcp", "workflow", "chat"];
 function parseRoute(hash: string): Route {
   const [path, search = ""] = hash.replace(/^#\/?/, "").split("?");
-  const [view = "workspace", id, sub] = path!.split("/").filter(Boolean);
+  const [view = "base-chat", id, sub] = path!.split("/").filter(Boolean);
   const query = new URLSearchParams(search);
+  if (view === "deployments") { query.set("tab", "readiness"); return { view: "workspace", query }; }
   if (view === "team") return { view: "agent-studio", ...(id ? { id } : {}), query };
   if (view === "tasks") return { view: "desk", ...(id ? { id } : {}), query };
   if (!PRIMARY_VIEWS.includes(view) && !LEGACY_VIEWS.includes(view)) return { view: "workspace", query };
@@ -201,11 +209,66 @@ window.addEventListener("hashchange", () => {
   notify("");
   if (snapshot) { render(); node("#title").focus(); if (view === "agent-studio" || view === "canvas") void loadAgentModels(); if (view === "agent-studio") void loadAgentTests(); }
 });
+document.addEventListener("submit", event => {
+  const form = event.target as HTMLFormElement;
+  if (form.id !== "workspace-tool-search") return;
+  event.preventDefault();
+  const query = new URLSearchParams({ tab: "tools", q: String(new FormData(form).get("q") ?? "").trim() });
+  navigate("#/workspace?" + query.toString());
+});
 let sessionFilter: SessionFilter = "all";
 let sessionQuery = "";
 let sessionDraft: SessionDraft = { title: "", brief: "" };
 let selectedPlaybook: string | undefined;
 let draftMaterials: Material[] = [];
+let ontologyPreview: OntologyPreview | undefined;
+let ontologyScope = "";
+let ontologyRequest = 0;
+function currentOntologyScope(): string {
+  return JSON.stringify([snapshot.workspaceId, snapshot.actor, snapshot.ontology]);
+}
+
+document.addEventListener("submit", async event => {
+  const form = event.target as HTMLFormElement;
+  if (form.id === "ontology-filter") {
+    event.preventDefault();
+    const query = new URLSearchParams({ q: String(new FormData(form).get("q") ?? "") });
+    navigate("#/ontology?" + query);
+    return;
+  }
+  if (form.id !== "ontology-read") return;
+  event.preventDefault();
+  const objectType = form.dataset.type!;
+  const primaryKey = String(new FormData(form).get("primaryKey") ?? "").trim();
+  const scope = currentOntologyScope();
+  const request = ++ontologyRequest;
+  ontologyScope = scope;
+  ontologyPreview = { objectType, primaryKey, loading: true };
+  render();
+  try {
+    const material = materialSchema.parse(await api("/api/ontology/reference", { objectType, primaryKey }));
+    // A response from the previous company must never appear in the next company's console.
+    if (scope !== currentOntologyScope() || request !== ontologyRequest) return;
+    ontologyPreview = { objectType, primaryKey, material };
+  } catch (error) {
+    if (scope !== currentOntologyScope() || request !== ontologyRequest) return;
+    ontologyPreview = { objectType, primaryKey, error: (error as Error).message };
+  }
+  if (view === "ontology") render();
+});
+
+document.addEventListener("click", event => {
+  if (!(event.target as Element).closest("[data-ontology-use]")) return;
+  if (!snapshot.canAuthor || ontologyScope !== currentOntologyScope() || !ontologyPreview?.material) return;
+  try {
+    if (!draftMaterials.some(item => item.id === ontologyPreview!.material!.id)) {
+      draftMaterials = materialsSchema.parse([...draftMaterials, ontologyPreview.material]);
+    }
+    navigate("#/desk/new");
+    notify("Reference added to your draft. No workflow started.");
+  } catch (error) { notify((error as Error).message, true); }
+});
+
 let selectedRun: string | undefined;
 let selectedPhase: number | undefined;
 let botRequestId = crypto.randomUUID();
@@ -240,7 +303,6 @@ let inspector = emptyInspector();
 let mailFolder: MailFolder = "inbox";
 let mailQuery = "";
 let selectedMail: string | undefined;
-const importedReferenceText = new WeakMap<HTMLFormElement, string>();
 const identity = node<HTMLSelectElement>("#identity");
 const detail = node<HTMLDialogElement>("#detail");
 const editor = node<HTMLDialogElement>("#editor");
@@ -265,7 +327,7 @@ async function api(path: string, data?: unknown, workspace = selectedWorkspace):
   });
   const result = await response.json();
   if (response.status === 401 && accountsEnabled) { location.assign("/login"); throw new Error("Sign in to continue."); }
-  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Agentick Developer to sign in again." : result.error ?? "Request failed.");
+  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Magentic Developer to sign in again." : result.error ?? "Request failed.");
   return result;
 }
 
@@ -290,6 +352,8 @@ async function refresh(): Promise<void> {
 }
 
 function render(): void {
+  const teamAdmin = companyMode && snapshot.roles.includes("admin");
+  companyTeam.context(teamAdmin ? snapshot.workspaceId : undefined, teamAdmin ? snapshot.actor : undefined);
   operationsRoot?.unmount(); operationsRoot = undefined;
   watchSchedule();
   if (view === "desk" || view === "pipelines") {
@@ -299,18 +363,16 @@ function render(): void {
   }
   node("#operator-context").textContent = `${snapshot.actor} · ${snapshot.roles.map(role => role === "approver" ? "Reviewer" : role === "admin" ? "Administrator" : role === "author" ? "Author" : role).join(", ") || "No assigned role"}`;
   node("#operator-context").title = `${node("#operator-context").textContent} · Workspace: ${snapshot.workspaceId}`;
+  node("#handling-top").innerHTML = snapshot.handling ? handlingBannerHtml(snapshot.handling, "top") : "";
+  node("#handling-bottom").innerHTML = snapshot.handling ? handlingBannerHtml(snapshot.handling, "bottom") : "";
+  document.body.classList.toggle("has-handling", Boolean(snapshot.handling));
   node("#environment-banner").innerHTML = snapshot.demo
-    ? (document.body.dataset.agentDemo === "openfema" ? "<strong>Federal Spaces demo</strong><span>Public OpenFEMA data · Offline Foundry replay · Demo reviewers</span>" : document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
+    ? (document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
     : companyMode ? "<strong>Company workspace</strong><span>Company membership controls access. Repository execution requires an isolated worker.</span>"
     : localMode ? "<strong>Local workspace</strong><span>Saved locally. Remote models receive sent content.</span>"
     : "<strong>Workspace session</strong><span>Verify deployment and data-handling settings before sensitive work.</span>";
-  node("#environment-banner").insertAdjacentHTML("beforeend", `<span class="mobile-operator-context">${escape(snapshot.workspaceId)} · ${escape(node("#operator-context").textContent ?? "")}</span>`);
   document.body.classList.toggle("developer-desk", view === "desk");
   renderWorkspaces();
-  if (!localMode) {
-    node(".workspace div").firstChild!.textContent = document.body.dataset.agentDemo === "openfema" ? "Federal Spaces demo" : document.body.dataset.agentDemo ? "Agent Studio demo" : snapshot.workspaceId;
-  }
-  node("#workspace-demo-note").hidden = !snapshot.demo;
   const primary = PRIMARY_VIEWS.includes(view);
   node("#new-agent").hidden = !snapshot.canAuthor || view !== "agents";
   node("#new-invitation").hidden = !snapshot.mail?.canInvite || view !== "email";
@@ -321,7 +383,10 @@ function render(): void {
   node("#nav-approvals").textContent = String(counts.approvals); node("#nav-approvals").hidden = counts.approvals === 0;
   node("#nav-attention").textContent = String(counts.attention); node("#nav-attention").hidden = counts.attention === 0;
   document.querySelectorAll<HTMLAnchorElement>("a.nav[data-route]").forEach((link) => {
-    const active = link.dataset.route === (view === "chat" ? "base-chat" : view === "canvas" ? "workflows" : view);
+    const section = view === "workflows" || view === "onboarding" ? "workspace" : view === "chat" ? "base-chat" : view;
+    const tab = view === "workflows" ? "workflows" : view === "onboarding" ? "access" : workspaceTab(route.query);
+    const active = link.dataset.route === section
+      && (section !== "workspace" || (link.dataset.consoleTab ?? "work") === tab);
     link.classList.toggle("active", active);
     if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
   });
@@ -336,7 +401,7 @@ function render(): void {
     node("#view").hidden = false;
     // A refused command is shown where the person is working, above the page it concerns.
     node("#view").innerHTML = (studioUi.error ? `<div class="inline-error" role="alert">${escape(studioUi.error)}</div>` : "") + page.body;
-    if (view === "workspace") operationsRoot = mountOperationsQueue(node("#operations-queue"), snapshot);
+    if (view === "workspace" && node("#operations-queue")) operationsRoot = mountOperationsQueue(node("#operations-queue"), snapshot);
     if (view === "base-chat" || view === "chat" || (view === "assistants" && route.id)) { const transcript = document.querySelector(".chat-transcript"); if (transcript) transcript.scrollTop = transcript.scrollHeight; }
     return;
   }
@@ -347,6 +412,12 @@ function render(): void {
 /** The six primary pages, from the route and the snapshot. */
 function currentPage(): Page {
   switch (view) {
+    case "ontology": {
+      const scope = currentOntologyScope();
+      if (ontologyScope !== scope) { ontologyPreview = undefined; ontologyScope = scope; ontologyRequest++; }
+      return ontologyPage(snapshot.workspaceId, snapshot.ontology, route.query, ontologyPreview, snapshot.canAuthor);
+    }
+    case "onboarding": return workspaceSetupPage(snapshot, companyMode, workspaceList?.workspaces.find(item => item.id === snapshot.workspaceId)?.name);
     case "zenfluence": return zenfluence.page();
     case "base-chat":
     case "chat": {
@@ -358,8 +429,7 @@ function currentPage(): Page {
     case "connections": {
       const scope = selectedWorkspace + ":" + snapshot.actor;
       if (chatAccessScope !== scope) { chatAccess = undefined; chatAccessError = ""; connectionFeedback = undefined; chatAccessScope = scope; void loadChatAccess(); }
-      return chatConnectionsPage(chatAccess, chatAccessError, connectionFeedbackScope === scope ? connectionFeedback : undefined,
-        { models: chatState.options, loading: chatState.loadingModels, error: chatState.error });
+      return chatConnectionsPage(chatAccess, chatAccessError, connectionFeedbackScope === scope ? connectionFeedback : undefined);
     }
     case "account": {
       if (accountScope !== selectedWorkspace + ":" + snapshot.actor) { accountSummary = undefined; accountError = undefined; accountScope = selectedWorkspace + ":" + snapshot.actor; void loadAccount(); }
@@ -368,7 +438,14 @@ function currentPage(): Page {
     case "marketplace": return workforceMarketplacePage(snapshot, workspaceList?.workspaces.find(item => item.id === selectedWorkspace)?.name ?? snapshot.workspaceId, route.id, route.query.get("group") ?? undefined, route.query.get("q") ?? "", route.query.get("library") === "1");
     case "agent-studio": return agentStudioPage(snapshot, route.id, route.query.get("preset"), agentModelScope === `${selectedWorkspace}:${snapshot.actor}` ? agentModels : [], studioUi,
       (["test", "workflow"].includes(route.sub ?? "") ? route.sub : "setup") as StudioSection, agentTestsScope === `${selectedWorkspace}:${snapshot.actor}` ? agentTests : undefined);
-    case "workspace": return { title: "Work queue", context: "Your next actions.", actions: snapshot.canAuthor ? '<button class="primary" data-work-new>+ New work item</button>' : "", body: hint("Open a work item to inspect its record, evidence, and next step. No action is executed from this queue.") + homeView(snapshot) };
+    case "workspace": {
+      const scope = snapshot.workspaceId + ":" + snapshot.actor;
+      if (slackScope !== scope) { slackPreview = undefined; slackScope = scope; }
+      return { title: "Workspace", context: workspaceList?.workspaces.find(item => item.id === snapshot.workspaceId)?.name ?? snapshot.workspaceId,
+        actions: snapshot.canAuthor && workspaceTab(route.query) === "work" ? '<button class="primary" data-work-new>+ New work item</button>' : "",
+        body: workspaceConsole(snapshot, companyMode, route.query, slackPreview)
+          + workspaceServiceView(snapshot, companyMode, route.query, companyTeam.state) };
+    }
     case "assistants":
       // The chat below an assistant always speaks as that assistant.
       if (route.id) prepareChat("workspace", route.id === WORKSPACE_ASSISTANT ? "" : route.id);
@@ -383,16 +460,17 @@ function currentPage(): Page {
   }
 }
 
-const PAGE_NAMES: Record<string, string> = { zenfluence: "Zenfluence", canvas: "Workflow canvas", marketplace: "Agent marketplace", connections: "Connections", "base-chat": "Chat", chat: "Chat", account: "Account & billing", "agent-studio": "Agent Studio", workspace: "Work queue", assistants: "Assistants", workflows: "Workflows", studio: "Model Studio", documents: "Reference documents", evaluations: "Evaluations", approvals: "Release approvals", activity: "Audit trail",
+const PAGE_NAMES: Record<string, string> = { deployments: "Workflow checks", onboarding: "Workspace setup", zenfluence: "Zenfluence", canvas: "Workflow canvas", marketplace: "Agent marketplace", connections: "Connections", "base-chat": "Chat", chat: "Chat", account: "Account & billing", "agent-studio": "Agent Studio", workspace: "Workspace", assistants: "Assistants", workflows: "Workflows", studio: "Model Studio", documents: "Reference documents", evaluations: "Evaluations", approvals: "Release approvals", activity: "Audit trail",
   desk: "Work items", pipelines: "Automation setup", agents: "Agent registry", email: "Notification previews", mcp: "MCP inspector", workflow: "Review policy" };
 
 function setHeading(page: Page): void {
   node("#title").textContent = page.title;
   node("#subtitle").textContent = page.context ?? "";
-  node("#crumbs").innerHTML = page.crumbs ? page.crumbs.map(([label, href]) => `<a href="${escape(href)}">${escape(label)}</a> / `).join("") : "";
+  const parents = page.crumbs ?? [];
+  const home = parents[0]?.[1] === "#/workspace" ? "" : '<a href="#/workspace">Console</a><span aria-hidden="true">›</span>';
+  node("#crumbs").innerHTML = home + parents.map(([label, href]) => `<a href="${escape(href)}">${escape(label)}</a><span aria-hidden="true">›</span>`).join("") + `<span aria-current="page">${escape(page.title)}</span>`;
   node("#page-actions").innerHTML = page.actions ?? "";
-  node("#breadcrumb").textContent = page.crumbs ? `${page.crumbs.map(([label]) => label).join(" / ")} / ${page.title}` : page.title;
-  document.title = `${page.title} · Agentick`;
+  document.title = `${page.title} · Magentic`;
 }
 
 function renderLegacy(): void {
@@ -509,6 +587,44 @@ document.addEventListener("click", async (event) => {
   const button = (event.target as Element).closest<HTMLElement>("button");
   if (!button || busy) return;
   if (!snapshot) { if (button.id === "refresh-workspace") void boot(); return; }
+  if (button.hasAttribute("data-company-team-refresh")) { await companyTeam.load(); return; }
+  if (button.dataset.slackAction) {
+    if (button.dataset.slackAction === "cancel") { slackPreview = undefined; render(); return; }
+    const scope = snapshot.workspaceId + ":" + snapshot.actor;
+    lock(true);
+    try {
+      if (button.dataset.slackAction === "preview") {
+        const result = await api("/api/slack", { action: "preview", kind: node<HTMLSelectElement>("#slack-kind").value, note: node<HTMLTextAreaElement>("#slack-note").value }) as SlackPreview;
+        if (scope === snapshot.workspaceId + ":" + snapshot.actor) { slackPreview = result; slackScope = scope; render(); }
+      } else if (button.dataset.slackAction === "send" && slackPreview && slackScope === scope) {
+        const result = await api("/api/slack", { action: "send", previewId: slackPreview.id, expectedHash: slackPreview.hash }) as SlackReceipt;
+        if (scope !== snapshot.workspaceId + ":" + snapshot.actor) return;
+        slackPreview = undefined; await refresh();
+        notify(result.state === "sent" ? "Slack accepted the message." : "Delivery unconfirmed. Check Slack before creating another message.", result.state !== "sent");
+      }
+    } catch (error) { notify((error as Error).message, true); }
+    finally { lock(false); }
+    return;
+  }
+  if (button.hasAttribute("data-deployment-refresh") || button.hasAttribute("data-deployment-export")) {
+    const workspace = selectedWorkspace, actor = snapshot.actor;
+    lock(true);
+    try {
+      if (button.hasAttribute("data-deployment-refresh")) await refresh();
+      else {
+        const report = await api("/api/deployment-report", undefined, workspace) as DeploymentReport;
+        if (workspace !== selectedWorkspace || actor !== snapshot.actor || report.workspaceId !== snapshot.workspaceId) return;
+        const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+        const link = document.createElement("a");
+        link.href = url; link.download = "magentic-deployment-report.json";
+        document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+        snapshot.deployment = report; render();
+        notify("Current report downloaded. No deployment was started.");
+      }
+    } catch (error) { notify((error as Error).message, true); }
+    finally { lock(false); }
+    return;
+  }
   if (button.id === "stop-chat") { chatController?.abort(); return; }
   if (button.id === "new-chat") { chatController?.abort(); chatState = resetChat(chatState); render(); return; }
   if (button.id === "refresh-models") { if (view === "agent-studio" || view === "canvas") void loadAgentModels(); else void loadChatModels(); return; }
@@ -759,7 +875,7 @@ async function sendChat(retry = false): Promise<void> {
     state.messages.push({ role: "user", content: text });
     state.draft = "";
   }
-  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Agentick…";
+  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Magentic…";
   const controller = new AbortController();
   chatController = controller;
   renderChat();
@@ -910,8 +1026,7 @@ function typingInPage(): boolean {
 async function loadChatModels(): Promise<void> {
   if (!snapshot.chat.configured || chatState.busy) return;
   const state = chatState;
-  state.loadingModels = true;
-  if (view === "connections") render(); else renderChat();
+  state.loadingModels = true; renderChat();
   try {
     const result = await api("/api/chat/models") as { models: string[]; options?: typeof state.options; access?: ChatAccessSummary };
     if (chatState !== state) return;
@@ -935,7 +1050,7 @@ async function loadChatModels(): Promise<void> {
     state.selectedModel = desired || result.models[0] || state.options[0]?.id || "";
     state.error = result.models.length || state.options.length ? "" : "No models are installed. Install a model in Ollama, then refresh this list.";
   } catch (error) { if (chatState === state) state.error = (error as Error).message; }
-   finally { if (chatState === state) { state.loadingModels = false; renderChat(); if ((view === "agent-studio" || view === "canvas" || view === "connections") && !document.activeElement?.closest("form")) render(); } }
+  finally { if (chatState === state) { state.loadingModels = false; renderChat(); if ((view === "agent-studio" || view === "canvas") && !document.activeElement?.closest("form")) render(); } }
 }
 document.addEventListener("change", (event) => {
   const input = event.target as HTMLSelectElement;
@@ -1078,22 +1193,6 @@ function readPipelineConfig(): PipelineConfig {
   return readPipelineForm(pipelineDraft ?? snapshot.pipelines!.config,
     new FormData(node<HTMLFormElement>("#pipeline-config")), Boolean(snapshot.bots));
 }
-document.addEventListener("click", async event => {
-  const link = (event.target as Element).closest<HTMLAnchorElement>(".audit-links a[download]");
-  if (!link || link.origin !== location.origin || link.pathname !== "/api/audit-package") return;
-  event.preventDefault();
-  try {
-    const response = await fetch(link.href, { headers: await requestHeaders() });
-    if (!response.ok) throw new Error("Audit download failed. Refresh your workspace and try again.");
-    const url = URL.createObjectURL(await response.blob());
-    const download = document.createElement("a");
-    download.href = url;
-    download.download = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ?? "audit-package.json";
-    download.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) { notify((error as Error).message, true); }
-});
-
 async function pipelineCommand(data: unknown): Promise<void> {
   if (snapshot.bots?.busy) { notify("A bot is working. Stop it or wait before changing the pipeline.", true); return; }
   lock(true);
@@ -1541,7 +1640,6 @@ document.addEventListener("change", async event => {
       const text = await file.text();
       if (text.length > 6000 || text.includes("\0")) throw new Error("Use a text excerpt of at most 6000 characters.");
       if (!form.isConnected) return;
-      importedReferenceText.set(form, text);
       form.querySelector<HTMLTextAreaElement>("[name=content]")!.value = text;
       const title = form.querySelector<HTMLInputElement>("[name=title]")!;
       if (!title.value) title.value = file.name.slice(0, 120);
@@ -1564,11 +1662,7 @@ document.addEventListener("submit", async event => {
       draftMaterials = materialsSchema.parse([...draftMaterials, material]);
       render(); notify("Ontology snapshot added. Review the reference before starting the work item.");
     } else if (form.id === "work-material") {
-      const edited = String(data.get("content"));
-      const imported = importedReferenceText.get(form);
-      // Browsers normalize line endings in textareas. Keep an unedited file byte-for-byte for its citation.
-      const content = imported !== undefined && imported.replace(/\r\n?/g, "\n") === edited ? imported : edited;
-      draftMaterials = materialsSchema.parse([...draftMaterials, { id: crypto.randomUUID(), title: String(data.get("title")), content, ...(data.get("url") ? { url: String(data.get("url")) } : {}) }]);
+      draftMaterials = materialsSchema.parse([...draftMaterials, { id: crypto.randomUUID(), title: String(data.get("title")), content: String(data.get("content")), ...(data.get("url") ? { url: String(data.get("url")) } : {}) }]);
       render(); notify("Reference added to this draft.");
     } else if (form.id === "work-project") {
       const executable = String(data.get("executable")).trim();
@@ -1665,7 +1759,7 @@ document.addEventListener("submit", async event => {
 // Agent tests: save a prompt, run it against the saved version, record a review. Each is one command to the tests engine.
 document.addEventListener("submit", async event => {
   const form = event.target as HTMLFormElement;
-  const kind = form.id === "agent-test-case" ? "case" : form.id === "agent-test-review" ? "review" : form.dataset.form === "agent-test-run" ? "run" : "";
+  const kind = form.id === "agent-test-case" ? "case" : form.id === "agent-test-review" ? "review" : form.dataset.form === "agent-test-run" ? "run" : form.dataset.form === "agent-test-stop" ? "stop" : "";
   if (!kind) return;
   event.preventDefault();
   if (busy) return;
@@ -1679,6 +1773,10 @@ document.addEventListener("submit", async event => {
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       if (form.dataset.draft) delete studioUi.drafts[form.dataset.draft];
       notify(form.dataset.case ? "Test saved." : "Test saved. Run it to see the result.");
+    } else if (kind === "stop") {
+      await api("/api/agent-tests", { action: "cancel", runId: form.dataset.run });
+      if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
+      notify("Test stopped. Its evidence is saved.");
     } else if (kind === "run") {
       await api("/api/agent-tests", { action: "run", caseId: form.dataset.case, expectedVersion: Number(form.dataset.version) });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
@@ -1766,10 +1864,7 @@ async function loadChatAccess(): Promise<void> {
   chatAccessScope = scope;
   try {
     const result = await api("/api/chat/access") as ChatAccessSummary;
-    if (scope === selectedWorkspace + ":" + snapshot.actor) {
-      chatAccess = result; chatAccessError = "";
-      if (view === "connections") await loadChatModels();
-    }
+    if (scope === selectedWorkspace + ":" + snapshot.actor) { chatAccess = result; chatAccessError = ""; }
   } catch { if (scope === selectedWorkspace + ":" + snapshot.actor) chatAccessError = "Connections could not be loaded. Refresh to retry."; }
   finally { chatAccessLoading = false; if (view === "connections") { if (scope !== selectedWorkspace + ":" + snapshot.actor) void loadChatAccess(); else render(); } }
 }

@@ -1,6 +1,6 @@
 # MCP workflow architecture and verification
 
-Agentick is being built as an installed developer workspace. Desktop packaging
+Magentic is being built as an installed developer workspace. Desktop packaging
 is deferred while the MCP and workflow layers are completed. The loopback UI
 is the development and verification surface; public browser access is not part
 of this milestone.
@@ -19,7 +19,7 @@ of this milestone.
 | Developer space | `desk-view.ts`, `pipeline-view.ts`, `bot-view.ts`, `browser.ts` | Task composer, saved sessions, review queue, bot timeline, changes and checks. |
 | External automation | `pipeline.ts` Jira previews; LNKZ REST boundary | Jira and email delivery are not live. External connectors and conversation storage remain owned by LNKZ. |
 
-The workspace store owns Agentick's run and configuration records. It does not
+The workspace store owns Magentic's run and configuration records. It does not
 replace the relay's conversation store or authentication system.
 
 ## Execution path
@@ -136,10 +136,9 @@ $env:MAGENTIC_LLM_BASE_URL = 'http://127.0.0.1:11434'
 corepack pnpm local:workbench
 ```
 
-Open the printed loopback address. Model execution additionally needs a reachable
-Ollama service and the selected downloaded model. Workbench chat and bots use the
-native Ollama HTTP API; the standalone relay's optional retrieval adapters are
-unchanged. Automated policy tests do not establish model quality or live provider
+Open the printed loopback address. Model execution additionally needs Ollama,
+the selected downloaded model and the existing optional `@langchain/ollama`
+adapter. Automated policy tests do not establish model quality or live provider
 availability. Do not use a real project to test deliberately failing commands.
 
 ### The documentation portal
@@ -718,3 +717,24 @@ back when the person returns to a phase. Irreversible decisions (retire a
 release, archive a project, disable an assistant) ask for an inline
 confirmation. A refused command is shown on the page it concerned. Statuses
 never rely on color alone.
+
+## Company reviewer coverage
+
+Workspace → Access offers an on-demand team check to company administrators.
+`GET /api/company-team` derives its workspace from authentication, accepts no
+query parameters, and checks current administrator membership before and after
+reading Clerk's organization membership list. Local mode cannot use this endpoint.
+It uses the existing Clerk backend key and company role mapping; it never changes
+membership or sends invitations.
+
+The response contains member IDs and mapped roles, without contact details.
+Waiting handoffs use each run's saved approval count. Remaining reviewer counts
+exclude its owner, output author and existing signers. These are staffing facts
+at the displayed check time, not approvals or a deployment certificate. Model
+releases keep their separate signing policy.
+
+The provider lookup has a ten-second deadline and a 2,500-member limit. Partial,
+duplicate, foreign or inconsistent pages fail rather than return partial coverage.
+The UI clears old counts on refresh failure and discards responses after a company,
+identity or administrator-access change. Test coverage uses synthetic membership
+responses and signed test sessions; it does not prove a live Clerk connection.

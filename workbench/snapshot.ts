@@ -1,4 +1,6 @@
 import type { OntologyCatalog } from "./ontology.js";
+import type { DeploymentReport } from "./deployment-report.js";
+import type { SlackSummary } from "./slack.js";
 import type { RegistryRecord } from "../registry/record.js";
 import type { AuditEvent } from "../registry/audit.js";
 import type { Workflow } from "../registry/workflow.js";
@@ -18,6 +20,8 @@ export type RecordView = RegistryRecord & { hash: string; eligible: boolean; val
 
 /** Everything GET /api/workspace returns. The pages render from this and nothing else. */
 export interface WorkbenchSnapshot {
+  deployment?: DeploymentReport;
+  slack?: SlackSummary;
   ontology?: OntologyCatalog;
   pipelines?: PipelineSnapshot;
   jira?: { canReview: boolean };
@@ -29,4 +33,6 @@ export interface WorkbenchSnapshot {
   documents?: DocumentState;
   workspaceId: string; actor: string; roles: Role[]; workflow: Workflow;
   canAuthor: boolean; records: RecordView[]; audit: AuditEvent[]; demo: boolean; mail?: Mailbox; mcp: McpOverview; chat: ChatAvailability;
+  /** The deployment's handling marking (for example CUI), shown on every page and stamped into exports. Absent when none is set. */
+  handling?: string;
 }

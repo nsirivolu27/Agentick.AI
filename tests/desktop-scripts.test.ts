@@ -14,7 +14,7 @@ test("installer, launcher and uninstaller agree on shared Windows names", async 
   const [install, start, uninstall] = await Promise.all([script("Install.ps1"), script("Start-Magentic.ps1"), script("Uninstall.ps1")]);
   const mutex = "Local\\MagenticDeveloper-$identity";
   assert.ok(start.includes(mutex) && uninstall.includes(mutex));
-  const shortcut = "'Agentick Developer.lnk'";
+  const shortcut = "'Magentic Developer.lnk'";
   assert.ok(install.includes(shortcut) && uninstall.includes(shortcut));
   const key = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MagenticDeveloper";
   assert.ok(install.includes(key) && uninstall.includes(key));

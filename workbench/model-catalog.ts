@@ -188,11 +188,10 @@ export function withCloudModels(base: ChatConfiguration, env?: NodeJS.ProcessEnv
     return [...local.map(option => ({ ...option, outputLimit: base.outputLimit === true })),
       ...cloud.map(option => ({ ...option, outputLimit: true }))];
   }
-  const defaultModel = base.model || cloud.find(model => model.available)?.id || "";
   return {
-    provider: base.model ? base.provider : defaultModel.split("/")[0] || base.provider, model: defaultModel, modelOptions,
+    provider: base.provider, model: base.model, modelOptions,
     listModels: async () => (await modelOptions()).filter((model) => model.available).map((model) => model.id),
-    async loadModel(id = defaultModel, options) {
+    async loadModel(id = base.model, options) {
       const option = cloud.find((model) => model.id === id);
       if (!option) {
         // An id naming a cloud provider that is not among the options is a

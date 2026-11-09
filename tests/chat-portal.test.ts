@@ -51,7 +51,7 @@ test("chat sign-in only accepts the named local destination", () => {
     assert.doesNotMatch(loginPage(undefined, next), /href="https:\/\/example.com|href="javascript:/);
   }
   const page = loginPage(undefined, "chat");
-  assert.match(page, /Chat with Agentick/); assert.match(page, /href="\/#\/base-chat"/);
+  assert.match(page, /Chat with Magentic/); assert.match(page, /href="\/#\/base-chat"/);
   assert.match(page, /Online sign-in is not configured/);
 });
 

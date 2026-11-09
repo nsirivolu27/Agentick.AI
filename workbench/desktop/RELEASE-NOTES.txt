@@ -1,4 +1,4 @@
-AGENTICK DEVELOPER — RELEASE NOTES
+MAGENTIC DEVELOPER — RELEASE NOTES
 
 The package version is in version.json next to this file and in
 Apps & features after installation.

@@ -5,7 +5,7 @@
     </marker>
   </defs>
   <rect width="1200" height="400" rx="18" fill="#0b0b0f"/>
-  <text x="48" y="58" fill="#ededf2" font-size="26" font-weight="600">One workflow stage in Agentick</text>
+  <text x="48" y="58" fill="#ededf2" font-size="26" font-weight="600">One workflow stage in Magentic</text>
   <text x="48" y="88" fill="#b0b0bf" font-size="16">AI drafts. People decide. Nothing advances on its own.</text>
 
   <!-- step 1 -->

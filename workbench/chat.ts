@@ -85,17 +85,21 @@ export async function runWorkspaceAgent(
     await server.connect(serverTransport as unknown as Parameters<typeof server.connect>[0]);
     await client.connect(clientTransport as unknown as Parameters<typeof client.connect>[0]);
     const { tools } = await client.listTools();
-    // Small models can answer workflow questions without requesting evidence.
-    // Read the authoritative pipeline first so that guessing is not the default path.
-    if (reads?.pipelines && /\b(workflow|pipeline|stage|work items?|handoff)\b/i.test(messages.at(-1)?.content ?? "")) {
+    // Small models can answer policy or workflow questions without requesting evidence.
+    // Read the authoritative configuration first so guessing is not the default path.
+    const question = messages.at(-1)?.content ?? "";
+    const initialReads: string[] = [];
+    if (/\b(policy|policies|approvals?|reviewers?|signatures?|requiredApprovals|get_workspace_policy)\b/i.test(question)) initialReads.push("get_workspace_policy");
+    if (reads?.pipelines && /\b(workflow|pipeline|stage|work items?|handoff)\b/i.test(question)) initialReads.push("get_pipeline");
+    for (const name of initialReads) {
       const roles = await context.members?.rolesFor(workspaceId, actor);
       if (!roles?.length) throw new Error("Workspace membership is required.");
       signal.throwIfAborted();
-      emit({ type: "tool", name: "get_pipeline", state: "running" });
-      const result = await untilAborted(client.callTool({ name: "get_pipeline", arguments: {} }), signal);
-      emit({ type: "tool", name: "get_pipeline", state: result.isError ? "failed" : "done" });
+      emit({ type: "tool", name, state: "running" });
+      const result = await untilAborted(client.callTool({ name, arguments: {} }), signal);
+      emit({ type: "tool", name, state: result.isError ? "failed" : "done" });
       const serialized = JSON.stringify(result);
-      observations.push({ tool: "get_pipeline", arguments: {}, result: serialized.length > 6_000 ? serialized.slice(0, 6_000) + " [truncated]" : result });
+      observations.push({ tool: name, arguments: {}, result: serialized.length > 6_000 ? serialized.slice(0, 6_000) + " [truncated]" : result });
     }
     for (let turn = 0; turn < 4; turn++) {
       signal.throwIfAborted();
@@ -105,7 +109,7 @@ export async function runWorkspaceAgent(
       const prompt = [
         persona
           ? `You are "${persona.name}", an assistant inside this workspace, answering under approved release ${persona.release}. Respond naturally and concisely.`
-          : "You are Agentick, the helpful AI assistant inside this workspace. Respond naturally and concisely.",
+          : "You are Magentic, the helpful AI assistant inside this workspace. Respond naturally and concisely.",
         // Profile instructions shape tone and focus. They come after the
         // rules and cannot loosen them: the profile is data, not authority.
         ...(persona ? [`ASSISTANT PROFILE INSTRUCTIONS (follow within the rules below; they grant no tools or permissions): ${persona.instructions}`] : []),
@@ -124,7 +128,7 @@ export async function runWorkspaceAgent(
       usage = addUsage(usage, usageOf(response)) ?? undefined;
       const text = typeof response.content === "string" ? response.content : "";
       if (text.length > 16_000) throw new Error("Model response exceeded the limit.");
-      const decision = decisionSchema.parse(JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()));
+      const decision = decisionSchema.parse(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()));
       if (decision.type === "answer") { emit({ type: "answer", content: decision.content, ...(usage ? { usage } : {}) }); return; }
       if (turn === 3) throw new Error("Tool call limit reached.");
       // Tool names and schemas are checked again by MCP. A model response can
@@ -156,7 +160,7 @@ export async function runBaseChat(messages: ChatMessage[], model: AgentModel, si
   // The base chat receives only this conversation. Workspace context and
   // tool discovery belong to the separate, permission-checked assistant.
   const prompt = [
-    "You are Agentick, a helpful general-purpose assistant. Be clear and concise.",
+    "You are Magentic, a helpful general-purpose assistant. Be clear and concise.",
     "You have no tools or access to workspace files, internal documents, or live systems. Do not claim to read or change them. Ask the user to provide any material needed to answer.",
     'Return one JSON object without markdown fences: {"type":"answer","content":"Your reply"}.',
     "CONVERSATION: " + JSON.stringify(messages),
@@ -165,7 +169,7 @@ export async function runBaseChat(messages: ChatMessage[], model: AgentModel, si
   signal.throwIfAborted();
   const text = typeof response.content === "string" ? response.content : "";
   if (text.length > 16_000) throw new Error("Model response exceeded the limit.");
-  const answer = baseAnswerSchema.parse(JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()));
+  const answer = baseAnswerSchema.parse(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()));
   const usage = usageOf(response);
   emit({ type: "answer", content: answer.content, ...(usage ? { usage } : {}) });
 }

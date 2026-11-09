@@ -1,6 +1,6 @@
 # Bot timeline and developer environments
 
-Agentick is a companion application for an existing Git repository and editor.
+Magentic is a companion application for an existing Git repository and editor.
 Attach a repository, configure validation commands, assign a bot and model to
 each phase, and start a run. The development template assigns planners,
 coding, validation, and review bots without lowering existing approval gates.
@@ -28,7 +28,7 @@ gated handoffs. A single-owner installation can therefore stop at a review gate.
 
 Each run starts a detached worktree from committed HEAD. Uncommitted changes
 in the developer's original folder are not copied. Worktrees persist for review;
-open their displayed paths in any editor. Agentick does not install dependencies,
+open their displayed paths in any editor. Magentic does not install dependencies,
 commit, merge, push, publish, or send Jira updates automatically.
 
 Model access is limited to project file listing, UTF-8 reads and project diffs.

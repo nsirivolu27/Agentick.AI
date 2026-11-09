@@ -1,5 +1,3 @@
-import type { OntologyReader } from "./ontology.js";
-import { declarationBrief, verifiedDeclarationSample } from "./declaration-sample.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { configurableCatalog } from "./agent-configurables.js";
@@ -7,7 +5,7 @@ import type { PipelineEngine } from "./pipeline.js";
 import type { DocumentsEngine } from "./documents.js";
 
 export interface WorkspaceReads { pipelines?: PipelineEngine | undefined; documents?: DocumentsEngine | undefined }
-export function registerWorkspaceReads(server: McpServer, workspace: string, engine?: PipelineEngine, documents?: DocumentsEngine, ontology?: OntologyReader) {
+export function registerWorkspaceReads(server: McpServer, workspace: string, engine?: PipelineEngine, documents?: DocumentsEngine) {
   const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   if (engine) server.registerTool("get_pipeline", { description: "Read the workspace pipeline configuration and compact run summaries.",
     inputSchema: z.object({}).strict(), annotations: { readOnlyHint: true } }, async () => {
@@ -19,20 +17,6 @@ export function registerWorkspaceReads(server: McpServer, workspace: string, eng
     inputSchema: z.object({ runId: z.string().uuid() }).strict(), annotations: { readOnlyHint: true } }, async ({ runId }) => {
     const run = engine.snapshot(workspace).runs.find(item => item.id === runId);
     return run ? result(run) : { ...result({ error: "Run not found in this workspace." }), isError: true };
-  });
-  if (engine && ontology?.catalog().mode === "foundry" && ontology.catalog().objectTypes.some(type => type.apiName === "Declaration")) server.registerTool("summarize_declaration_sample", {
-    description: "Check an attached OpenFEMA sample against the mapped Foundry Declaration objects. Return verified rows, counts and source references.",
-    inputSchema: z.object({ runId: z.string().uuid(), materialId: z.string().uuid() }).strict(),
-    annotations: { readOnlyHint: true },
-  }, async ({ runId, materialId }) => {
-    const run = engine.snapshot(workspace).runs.find(item => item.id === runId);
-    const material = run?.materials?.find(item => item.id === materialId);
-    if (!material) return { ...result({ error: "Reference not found in this workspace run." }), isError: true };
-    try {
-      const sample = await verifiedDeclarationSample(material, ontology);
-      return result({ ...sample, brief: declarationBrief(sample) });
-    }
-    catch (error) { return { ...result({ error: error instanceof Error ? error.message : "Invalid declaration snapshot." }), isError: true }; }
   });
   if (documents) server.registerTool("list_documents", {
     description: "List the documents in this workspace's documentation portal: title, size, how many lines looked like a credential, an excerpt, and the runs and datasets each one is connected to. The content stays on the machine.",

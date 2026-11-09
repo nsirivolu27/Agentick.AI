@@ -1,6 +1,6 @@
 export function companyPage(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Companies · Agentick</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/agency.css"><script src="/account-client.js" defer></script><script src="/company-client.js" defer></script></head>
-  <body class="account-login"><main class="login-layout"><section class="login-story"><a href="/welcome" class="login-brand"><span class="login-diamond">◆</span>Agentick</a><div><span class="eyebrow">COMPANY WORKSPACES</span><h1>Your team.<br>Your agents.</h1><p>Documents, automations and approvals in your company workspace.</p></div></section>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Companies · Magentic</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/agency.css"><script src="/account-client.js" defer></script><script src="/company-client.js" defer></script></head>
+  <body class="account-login"><main class="login-layout"><section class="login-story"><a href="/welcome" class="login-brand"><span class="login-diamond">◆</span>Magentic</a><div><span class="eyebrow">COMPANY WORKSPACES</span><h1>Your team.<br>Your agents.</h1><p>Documents, automations and approvals in your company workspace.</p></div></section>
   <section class="login-card"><h2>Choose your company</h2><p>Create or manage your company through Clerk.</p><div id="company-switcher"></div><div id="company-list" role="status">Loading companies…</div><p id="company-error" role="alert"></p><button id="company-refresh" class="secondary">Refresh companies</button><button class="secondary" data-account-signout>Sign out</button><p class="login-footnote">An admin sets up the workspace. Membership controls access.</p></section></main></body></html>`;
 }
 
@@ -33,6 +33,9 @@ export const companyClientScript = `
       for (const company of companies) {
         const card = document.createElement('section'); card.className = 'account-panel';
         const name = document.createElement('h3'); name.textContent = company.name;
+        const access = document.createElement('p');
+        const labels = {admin:'Administrator', author:'Author', approver:'Reviewer'};
+        access.textContent = 'Your roles: ' + company.roles.map(role => labels[role]).join(' · ');
         const button = document.createElement('button'); button.className = 'primary';
         button.textContent = company.workspaceId ? 'Open workspace' : company.canCreate ? 'Set up workspace' : 'Waiting for admin';
         button.disabled = !company.workspaceId && !company.canCreate;
@@ -41,10 +44,10 @@ export const companyClientScript = `
           try {
             const result = await request('/api/companies/open', {organizationId:company.organizationId});
             sessionStorage.setItem('magentic.companyWorkspace', result.workspaceId);
-            location.assign('/#/marketplace');
+            location.assign('/#/onboarding');
           } catch (failure) { error.textContent = failure.message; button.disabled = false; }
         };
-        card.append(name, button); list.appendChild(card);
+        card.append(name, access, button); list.appendChild(card);
       }
     } catch (failure) { list.textContent = ''; error.textContent = failure.message; }
     finally { refresh.disabled = false; }

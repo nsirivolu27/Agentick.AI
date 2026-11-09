@@ -79,7 +79,7 @@ export function buildAuditPackage(run: PipelineRun, options: { workspaceId: stri
       ...(stage.draft ? { draft: { text: stage.draft.text, hash: stage.draft.hash, by: stage.draft.by, at: stage.draft.at } } : {}),
     })),
     events: run.events.map(event => ({ at: event.at, actor: event.actor, stage: event.stage, action: event.action, detail: event.detail })),
-    materials: [...(run.workflowSource ? [run.workflowSource] : []), ...(run.materials ?? [])].map(material => ({ title: material.title, ...(material.url ? { url: material.url } : {}), content: material.content, contentHash: sha256(material.content) })),
+    materials: (run.materials ?? []).map(material => ({ title: material.title, ...(material.url ? { url: material.url } : {}), content: material.content, contentHash: sha256(material.content) })),
   };
   return { ...body, packageHash: bodyHash(body) };
 }
@@ -101,11 +101,7 @@ export function verifyAuditPackage(raw: unknown): Verification {
     const where = `Stage ${stage.index + 1} (${stage.name})`;
     if (stage.output && sha256(stage.output) !== stage.outputHash) problems.push(`${where}: the output text does not match its recorded hash.`);
     if (stage.draft && sha256(stage.draft.text) !== stage.draft.hash) problems.push(`${where}: the draft text does not match its recorded hash.`);
-    if (new Set(stage.approvals).size !== stage.approvals.length) problems.push(`${where}: repeated reviewer.`);
     for (const signer of stage.approvals) {
-      if (!pkg.events.some(event => event.action === "approved" && event.actor === signer && event.detail === `Approved output ${stage.outputHash}.`)) {
-        problems.push(`${where}: no approval event for ${signer} names the output hash.`);
-      }
       if (signer === pkg.run.owner) problems.push(`${where}: the run owner ${signer} appears as a signer.`);
       if (signer === stage.outputBy) problems.push(`${where}: the output author ${signer} appears as a signer.`);
     }

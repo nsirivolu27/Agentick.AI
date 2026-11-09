@@ -1,4 +1,5 @@
 import { loadZenfluenceDirectory } from "./zenfluence.js";
+import { loadSlack } from "./slack.js";
 import { createAutomationRuntime, loadAutomationUnits, type AutomationRuntime } from "./automation-runtime.js";
 import { lambdaInvoker } from "./automation-lambda.js";
 import { companyChatIdentity } from "./company-chat.js";
@@ -8,6 +9,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { loadAccounts } from "./accounts.js";
 import { clerkMemberships, createCompanyAccess } from "./company-access.js";
+import { clerkCompanyRoster } from "./company-team.js";
 import { fileWorkspaceStore, workspacesDirectory } from "./storage.js";
 import { workspaceDirectory } from "./workspace-directory.js";
 import { filePipelines } from "./pipeline.js";
@@ -58,6 +60,7 @@ export async function startCompanyWorkbench() {
   const automationUnits = loadAutomationUnits();
   const zenfluence = loadZenfluenceDirectory();
   const dataDir = workspacesDirectory();
+  const slack = loadSlack(join(dataDir, "slack-receipts"));
   const store = fileWorkspaceStore(dataDir);
   let server: ReturnType<typeof createWorkbenchServer> | undefined;
   let scheduler: ReturnType<typeof createScheduler> | undefined;
@@ -65,7 +68,7 @@ export async function startCompanyWorkbench() {
   let ticker: ReturnType<typeof setInterval> | undefined;
   try {
     const directory = workspaceDirectory(dataDir, store, "company-system");
-    const companies = createCompanyAccess(accounts, directory, memberships);
+    const companies = createCompanyAccess(accounts, directory, memberships, clerkCompanyRoster(setting("MAGENTIC_CLERK_SECRET_KEY") ?? ""));
     const workflow = resolveWorkflow();
     // A tenant may upload text, never select a file from the shared server.
     const studio = createModelStudio({ storage: "file", persistence: fileStudioStore(join(dataDir, "model-studio")),
@@ -91,9 +94,9 @@ export async function startCompanyWorkbench() {
       context: { store: fileStore(join(dataDir, "registry")), audit: fileAudit(join(dataDir, "audit")), members: companies.members, workflow },
       authenticate: companyChatIdentity(chatAccess, async request => {
         const identity = await companies.authenticate(request);
-        return identity ? { ...identity, canRunAutomations: true } : undefined;
+        return identity ? { ...identity, canRunAutomations: true, canSendSlack: true } : undefined;
       }), guard, pipelines, studio, scheduler, documents, ontology, automations, zenfluence,
-      billing, chatAccess, chat });
+      billing, chatAccess, chat, ...(slack ? { slack } : {}) });
     await new Promise<void>((resolve, reject) => { server!.once("error", reject); server!.listen(port, "127.0.0.1", resolve); });
     ticker = setInterval(() => {
       for (const entry of directory.list().workspaces) if (entry.organizationId) void runningScheduler.tick(entry.id).catch(() => undefined);

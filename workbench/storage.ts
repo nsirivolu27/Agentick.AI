@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { materialSchema, materialsSchema } from "./materials.js";
+import { materialsSchema } from "./materials.js";
 import { setting } from "../env.js";
 import { pipelineSchema, type PipelineConfig, type PipelineRun } from "./pipeline.js";
 import { dedupeKeyFor, hashIntent, jiraIntentSchema, type PendingJiraAction } from "./jira.js";
@@ -76,7 +76,7 @@ const jiraSchema = z.object({
 const runSchema = z.object({
   id: z.string().uuid(), requestId: z.string().uuid(), workspaceId: z.string().min(1),
   owner: z.string().min(1).max(200), title: z.string().min(1), brief: z.string().min(1),
-  workflowSource: materialSchema.optional(), materials: materialsSchema.optional(), issueKey: z.string().nullable(), config: pipelineSchema, version: z.number().int().min(1),
+  materials: materialsSchema.optional(), issueKey: z.string().nullable(), config: pipelineSchema, version: z.number().int().min(1),
   revision: z.number().int().min(1), requiredApprovals: z.number().int().min(1).max(10),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   status: z.enum(["running", "paused", "blocked", "complete", "cancelled"]),
@@ -294,7 +294,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
     if ((cause as { code?: string }).code === "EEXIST") {
       throw new StorageError(
         `Another instance is already using ${directory}. Close it and try again. `
-        + `If no Agentick process is running, delete ${lockPath} and retry.`,
+        + `If no Magentic process is running, delete ${lockPath} and retry.`,
       );
     }
     throw new StorageError(`Could not take the writer lock in ${directory}.`, { cause });
@@ -336,7 +336,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
       if (envelope.success && envelope.data.storageVersion !== STORAGE_VERSION) {
         throw new StorageError(
           `Workspace ${workspace} has storage version ${envelope.data.storageVersion}; this build reads version ${STORAGE_VERSION}. `
-          + `Upgrade Agentick, or move ${path} aside to start fresh.`,
+          + `Upgrade Magentic, or move ${path} aside to start fresh.`,
         );
       }
 

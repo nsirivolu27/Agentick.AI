@@ -1,11 +1,14 @@
 import { ZenfluenceError, type ZenfluenceDirectory } from "./zenfluence.js";
+import { deploymentReport } from "./deployment-report.js";
+import { SlackError, slackCommandSchema, type Slack } from "./slack.js";
 import { newlyAssigned } from "./agent-configurables.js";
-import { passedCurrentTest } from "./agent-tests-model.js";
+import { blockingTestReviews, passedCurrentTest } from "./agent-tests-model.js";
 import { pipelineSchema, type PipelineConfig } from "./pipeline.js";
 import { zenfluenceCommand } from "./zenfluence-api.js";
 import { AutomationError, type AutomationRuntime } from "./automation-runtime.js";
 import { ChatHistoryError } from "./chat-history.js";
 import type { CompanyAccess } from "./company-access.js";
+import { companyTeamReport } from "./company-team.js";
 import { companyPage, companyClientScript } from "./company-page.js";
 import { ChatAccessError, type ChatAccess } from "./chat-access.js";
 import { handleChatMcp } from "./chat-mcp.js";
@@ -38,18 +41,14 @@ import type { Scheduler } from "./scheduler.js";
 import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import { DocumentError, type DocumentsEngine } from "./documents.js";
 import { StudioStorageError } from "./studio/store.js";
-
 import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit } from "./audit-package.js";
-import { randomUUID } from "node:crypto";
-import { declarationBrief, verifiedDeclarationSample } from "./declaration-sample.js";
-import { isDeclarationMaterial } from "./materials.js";
 
 export interface WorkspaceIdentity {
-  recentSignIn?: boolean;
   workspaceId: string; actor: string;
   // A standalone MCP credential must not inherit local delivery authority.
   canDeliverJira?: boolean;
   canRunAutomations?: boolean;
+  canSendSlack?: boolean;
 }
 export interface WorkbenchOptions {
   context: TransitionContext;
@@ -66,8 +65,11 @@ export interface WorkbenchOptions {
   guard?: (request: IncomingMessage, response: ServerResponse) => { status: number; message: string } | undefined;
   accounts?: AccountsConfig;
   companies?: CompanyAccess;
+  slack?: Slack;
   billing?: Billing;
   demo?: boolean;
+  /** Handling marking for every page and export; see handling-marking.ts. */
+  handling?: string;
   email?: EmailPortal;
   chat?: ChatConfiguration;
   chatAccess?: ChatAccess;
@@ -111,6 +113,15 @@ class RequestError extends Error {
 }
 
 export function createWorkbenchServer(options: WorkbenchOptions) {
+  const inspectDeployment = (workspaceId: string) => deploymentReport({
+    workspaceId, mode: options.companies ? "company" : options.demo ? "demo" : "local",
+    requiredApprovals: (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals,
+    ...(options.pipelines ? { pipeline: options.pipelines.snapshot(workspaceId) } : {}),
+    ...(options.studio ? { studio: options.studio } : {}),
+    scheduler: !!options.scheduler,
+    modelConfigured: !!options.chat?.model && options.chat.provider !== "unconfigured",
+    repositoryWorker: !!options.bots, repositoryAttached: !!options.bots?.snapshot(workspaceId).project,
+  });
   // Jobs run in the background; a failure is recorded on the job, never thrown at a request.
   const tickScheduler = (workspaceId: string) => {
     try { options.learning?.tick(workspaceId); } catch { /* a cycle that throws is recorded on its run; the request already answered */ }
@@ -170,6 +181,21 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       const { workspaceId, actor } = identity;
       const roles = await options.context.members!.rolesFor(workspaceId, actor);
       if (!roles.length) throw new PermissionError("You are not a member of this workspace.");
+      if (path === "/api/company-team") {
+        if (request.method !== "GET") throw new RequestError(405, "Team coverage is read-only.");
+        if (new URL(request.url!, "http://localhost").search) throw new RequestError(400, "Team coverage uses the signed-in workspace; no query parameters are accepted.");
+        if (!options.companies) throw new RequestError(503, "Team coverage requires company sign-in.");
+        if (!roles.includes("admin") || options.companies.actor(request) !== actor) throw new PermissionError("A signed-in company administrator must check team coverage.");
+        const team = await options.companies.team(workspaceId, actor);
+        await pending;
+        response.setHeader("Cache-Control", "no-store");
+        send(response, 200, companyTeamReport(workspaceId, team, options.pipelines?.snapshot(workspaceId).runs)); return;
+      }
+      if (request.method === "GET" && path === "/api/deployment-report") {
+        if (new URL(request.url!, "http://localhost").search) throw new RequestError(400, "The deployment report uses the signed-in workspace; no query parameters are accepted.");
+        await pending;
+        send(response, 200, inspectDeployment(workspaceId)); return;
+      }
       if (request.method === "GET" && path === "/api/zenfluence") {
         // The workspace id is included so an unconfigured page can show exactly
         // what to put in the connection file.
@@ -210,6 +236,10 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
           ...(options.learning ? { learning: options.learning.snapshot(workspaceId) } : {}),
           ...(options.documents ? { documents: options.documents.snapshot(workspaceId) } : {}),
           workspaceId, actor, roles, workflow, demo: options.demo ?? false,
+          ...(options.handling ? { handling: options.handling } : {}),
+          deployment: inspectDeployment(workspaceId),
+          slack: options.slack?.summary(workspaceId, !!identity.canSendSlack && roles.includes("admin"))
+            ?? { configured: false, ready: false, canSend: false, receipts: [] },
           ...(options.jira ? { jira: { canReview: !!identity.canDeliverJira && roles.includes("admin") } } : {}),
           ...studioSnapshot(options.studio, workspaceId),
           canAuthor: roles.includes("admin") || roles.includes(workflow.roles.author),
@@ -243,6 +273,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         // One run's chain of custody as a file. Any member may read it; it only contains what the run page already shows.
         const query = new URL(request.url!, "http://localhost").searchParams;
         const markdown = query.get("format") === "markdown";
+        const marking = options.handling ? { handling: options.handling } : {};
         const deliver = (name: string, text: string) => {
           response.writeHead(200, { "Content-Type": markdown ? "text/markdown; charset=utf-8" : "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${name}.${markdown ? "md" : "json"}"` });
@@ -250,12 +281,12 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         };
         if (query.get("scope") === "workspace") {
           // The whole workspace: every run's package plus the definition audit log, under one bundle hash.
-          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor });
+          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor, ...marking });
           deliver(`workspace-audit-${workspaceId}`, markdown ? renderWorkspaceAudit(bundle) : JSON.stringify(bundle, null, 2)); return;
         }
         const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === query.get("run"));
         if (!run) throw new RequestError(404, "Run not found in this workspace.");
-        const pkg = buildAuditPackage(run, { workspaceId, actor });
+        const pkg = buildAuditPackage(run, { workspaceId, actor, ...marking });
         deliver(`audit-package-${run.id}`, markdown ? renderAuditPackage(pkg) : JSON.stringify(pkg, null, 2)); return;
       }
       if ((path === "/api/chat/models" || path === "/api/agent-studio/models") && request.method === "GET") {
@@ -291,6 +322,22 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         throw new RequestError(403, "Cross-origin writes are not allowed.");
       }
       const raw = await body(request);
+      if (path === "/api/slack") {
+        if (!identity.canSendSlack || !roles.includes("admin")) throw new PermissionError("Slack sending requires a company administrator session.");
+        if (!options.slack) throw new RequestError(503, "Slack is not configured on this server.");
+        const input = slackCommandSchema.parse(raw);
+        if (input.action === "send") {
+          send(response, 200, await options.slack.send(workspaceId, actor, input.previewId, input.expectedHash)); return;
+        }
+        const report = inspectDeployment(workspaceId);
+        const audit = ["Magentic workflow audit snapshot", "Workspace: " + workspaceId, "Checked: " + report.checkedAt,
+          "Workflow version: " + (report.workflow?.version ?? "Unavailable"),
+          "Workflow hash: " + (report.workflow?.hash ?? "Unavailable"),
+          "Readiness: " + report.status, "Stages: " + report.stages.length,
+          "Blockers: " + (report.blockers.length + report.stages.reduce((n, stage) => n + stage.blockers.length, 0)),
+          "This notification does not approve or execute work."].join("\n");
+        send(response, 200, options.slack.preview(workspaceId, actor, input.kind, input.note, audit)); return;
+      }
       if (path === "/api/zenfluence") {
         if (!options.zenfluence) throw new RequestError(404, "Zenfluence is not configured.");
         send(response, 200, await zenfluenceCommand(options.zenfluence, options.pipelines, { workspaceId, actor, roles }, raw)); return;
@@ -406,38 +453,18 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         if (!options.pipelines) throw new RequestError(404, "Pipelines are not configured.");
         await pending;
         const approvals = (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals;
-        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence, options.ontology?.(workspaceId), identity.recentSignIn === false ? "Sign in again before approving this handoff." : undefined);
+        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence);
         else {
-          if ((raw as { action?: unknown })?.action === "prepare_declaration_brief") {
-            const input = z.object({ action: z.literal("prepare_declaration_brief"), runId: z.string().uuid(),
-              expectedRevision: z.number().int().positive() }).strict().parse(raw);
-            const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === input.runId);
-            if (!run) throw new RequestError(404, "Work item not found.");
-            if (!roles.includes("admin") && !(roles.includes("author") && run.owner === actor)) throw new PermissionError("Only the owner or an admin can prepare a draft.");
-            const stage = run.config.stages[run.current]!;
-            const progress = run.stages[run.current]!;
-            if (run.status !== "running" || progress.status !== "active" || progress.draft
-              || !stage.approval || stage.assistantId || (stage.bot && stage.bot.kind !== "manual")) {
-              throw new RequestError(409, "Choose an active, unstaffed review gate without an existing draft.");
-            }
-            const material = run.materials?.find(isDeclarationMaterial);
-            const reader = options.ontology?.(workspaceId);
-            if (!run.workflowSource || !material || reader?.catalog().mode !== "foundry") throw new RequestError(409, "Start a work item with a Foundry-verified declaration sample.");
-            if (run.revision !== input.expectedRevision) throw new RequestError(409, "Work item changed. Refresh and try again.");
-            const sample = await verifiedDeclarationSample(material, reader);
-            // The revision check at write time also protects against changes during the remote reads.
-            send(response, 200, options.pipelines.draft(workspaceId, { runId: run.id, stageId: stage.id,
-              expectedRevision: input.expectedRevision, by: "Public data analyst (source tool)", jobId: randomUUID(), text: declarationBrief(sample) }));
-            return;
-          }
           // The studio shows "test before assigning"; the server holds the same line.
           if (options.agentTests && isConfigure(raw)) {
-            const untested = newlyAssigned(options.pipelines.snapshot(workspaceId).config, raw.config).filter(agent => !passedCurrentTest(agent, options.agentTests!.snapshot(workspaceId)));
+            const tests = options.agentTests.snapshot(workspaceId);
+            const assigned = newlyAssigned(options.pipelines.snapshot(workspaceId).config, raw.config);
+            const rejected = assigned.filter(agent => blockingTestReviews(agent, tests).length);
+            if (rejected.length) throw new RequestError(409, `Quality review blocks assignment of ${rejected.map(agent => agent.name).join(", ")}. Rerun the rejected cases and obtain a passing review, or revise the agent and test the new version.`);
+            const untested = assigned.filter(agent => !passedCurrentTest(agent, tests));
             if (untested.length) throw new RequestError(409, `Run a passing test on the current version of ${untested.map(agent => agent.name).join(", ")} before assigning it to a stage.`);
           }
-          if (identity.recentSignIn === false && (raw as { action?: unknown })?.action === "approve") throw new PermissionError("Sign in again before approving this handoff.");
-          const start = (raw as { action?: unknown })?.action === "start" && options.pipelines.start;
-          send(response, 200, start ? await start(workspaceId, actor, roles, raw, approvals) : options.pipelines.execute(workspaceId, actor, roles, raw, approvals));
+          send(response, 200, options.pipelines.execute(workspaceId, actor, roles, raw, approvals));
         }
         tickScheduler(workspaceId);
         return;
@@ -587,7 +614,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       send(response, 200, await run);
     } catch (error) {
       if (response.headersSent) { response.destroy(); return; }
-      if (error instanceof ZenfluenceError || error instanceof AutomationError || error instanceof ChatAccessError || error instanceof BillingError || error instanceof RequestError || error instanceof PipelineError || error instanceof JiraApiError || error instanceof StudioError || error instanceof DocumentError) send(response, error.status, { error: error.message });
+      if (error instanceof SlackError || error instanceof ZenfluenceError || error instanceof AutomationError || error instanceof ChatAccessError || error instanceof BillingError || error instanceof RequestError || error instanceof PipelineError || error instanceof JiraApiError || error instanceof StudioError || error instanceof DocumentError) send(response, error.status, { error: error.message });
       else if (error instanceof StudioStorageError) send(response, 409, { error: error.message });
       else if (error instanceof OntologyError) send(response, 502, { error: error.message });
       else if (error instanceof PermissionError) send(response, 403, { error: error.message });

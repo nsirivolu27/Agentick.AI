@@ -3,14 +3,14 @@ export function welcomePage(): string {
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Agentick connects agents, reference material, and human review in one browser workspace.">
-  <title>Agentick · Your work, connected</title>
+  <meta name="description" content="Magentic connects agents, reference material, and human review in one browser workspace.">
+  <title>Magentic · Your work, connected</title>
   <link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/agency.css">
 </head>
 <body class="welcome-page">
   <a class="skip-link" href="#welcome-main">Skip to content</a>
   <header class="welcome-nav">
-    <a href="/welcome" class="welcome-brand" aria-label="Agentick home"><span aria-hidden="true">◆</span> Agentick</a>
+    <a href="/welcome" class="welcome-brand" aria-label="Magentic home"><span aria-hidden="true">◆</span> Magentic</a>
     <nav aria-label="Website navigation"><a href="#workflow">How it works</a><a href="/login?next=chat" class="welcome-enter">Open chat <span aria-hidden="true">↗</span></a></nav>
   </header>
   <main id="welcome-main">
@@ -49,6 +49,6 @@ export function welcomePage(): string {
       </div>
     </section>
   </main>
-  <footer class="welcome-footer"><a class="welcome-brand" href="/welcome"><span aria-hidden="true">◆</span> Agentick</a><span>Agents with context. Work with oversight.</span><a href="/login">Workspace access ↗</a></footer>
+  <footer class="welcome-footer"><a class="welcome-brand" href="/welcome"><span aria-hidden="true">◆</span> Magentic</a><span>Agents with context. Work with oversight.</span><a href="/login">Workspace access ↗</a></footer>
 </body></html>`;
 }

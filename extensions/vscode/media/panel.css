@@ -1,5 +1,5 @@
 /* Borders, text and underlines preserve meaning when the display uses grayscale. */
-:root { color-scheme: dark; --bg: #161619; --surface: #202025; --fg: #f0edf2; --muted: #bcb6c2; --line: #6b6572; --subtle: #38343f; --focus: #72e69c; --button: #72e69c; --button-fg: #07120b; --accent: #72e69c; --tint: #11291b; --panel: #1c1c21; }
+:root { color-scheme: dark; --bg: #161619; --surface: #202025; --fg: #f0edf2; --muted: #bcb6c2; --line: #6b6572; --subtle: #38343f; --focus: #efa3d4; --button: #efa3d4; --button-fg: #281624; --accent: #efa3d4; --tint: #342332; --panel: #1c1c21; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.55 var(--vscode-font-family, system-ui, sans-serif); }
 .masthead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px; border-bottom: 1px solid var(--subtle); background: var(--panel); }

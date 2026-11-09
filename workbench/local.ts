@@ -19,8 +19,7 @@ import { createWorkbenchServer } from "./server.js";
 import { createLocalSession, loadMcpToken, sameSecret, type LocalSession } from "./local-session.js";
 import { chatConfiguration } from "./chat-config.js";
 import { workspaceDirectory } from "./workspace-directory.js";
-import { declarationEvidence } from "./declaration-sample.js";
-import { filePipelines, pipelineCommandSchema, PipelineError, type PipelineEngine } from "./pipeline.js";
+import { filePipelines, PipelineError, type PipelineEngine } from "./pipeline.js";
 import { createBotRuntime, type BotRuntime } from "./bot-runtime.js";
 import { createAgentTests } from "./agent-tests.js";
 import { fileWorkspaceStore, workspacesDirectory, type WorkspaceStore } from "./storage.js";
@@ -29,6 +28,7 @@ import { assistantGuards, studioAssistants } from "./assistant-resolver.js";
 import { chatModelLoader, createScheduler, fileSchedulePersistence } from "./scheduler.js";
 import { createLearningSchedule, fileLearningPersistence, folderImports } from "./learning-schedule.js";
 import { createDocuments, fileDocumentStore } from "./documents.js";
+import { loadHandlingMarking } from "./handling-marking.js";
 
 /**
  * The local application, composed.
@@ -121,6 +121,7 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
   const billing = createBilling(accounts?.billing, setting("MAGENTIC_STRIPE_SECRET_KEY"));
   const dataDir = options.dataDir ?? workspacesDirectory();
   const ontology = loadOntologyDirectory();
+  const handling = loadHandlingMarking();
   // Same connector as the company server, so a developer can read real tickets
   // and pages locally. Without MAGENTIC_ZENFLUENCE_FILE the page shows setup.
   const zenfluence = loadZenfluenceDirectory();
@@ -193,17 +194,9 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
     const pipelines: PipelineEngine = {
       snapshot: engine.snapshot,
       draft: engine.draft,
-      async start(workspace, actor, roles, raw, approvals) {
-        if (!roles.includes("admin") && !roles.includes("author")) throw new PipelineError(403, "An author or admin must start a run.");
-        const input = pipelineCommandSchema.parse(raw);
-        if (input.action !== "start") throw new PipelineError(400, "Expected a start command.");
-        const replay = engine.snapshot(workspace).runs.some(run => run.requestId === input.requestId);
-        const source = replay ? undefined : await declarationEvidence(input.materials ?? [], ontology(workspace));
-        return pipelines.execute(workspace, actor, roles, input, approvals, source);
-      },
-      execute(workspace, actor, roles, raw, approvals, workflowSource) {
+      execute(workspace, actor, roles, raw, approvals) {
         if (runtime.busy(workspace)) throw new PipelineError(409, "A bot is working in this workspace. Stop it before changing the pipeline.");
-        return engine.execute(workspace, actor, roles, raw, approvals, workflowSource);
+        return engine.execute(workspace, actor, roles, raw, approvals);
       },
     };
     jira = createJiraRuntime(pipelines, workspaceStore, options.jiraDelivery);
@@ -228,6 +221,7 @@ export async function startLocalWorkbench(options: LocalWorkbenchOptions = {}): 
       context, billing, chatAccess, ...(accounts ? { accounts } : {}),
       assets: assets(),
       pipelines, bots: runtime, jira: jiraRuntime, ontology, zenfluence, studio, scheduler, learning, documents, agentTests,
+      ...(handling ? { handling } : {}),
       guard: session.guard,
       async authenticate(request) {
         const path = new URL(request.url ?? "/", "http://localhost").pathname;
