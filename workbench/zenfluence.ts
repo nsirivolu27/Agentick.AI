@@ -23,10 +23,31 @@ export const zenfluenceConfigSchema = z.object({ connections: z.array(connection
     seen.add(connection.workspaceId);
   });
 });
-export const zenfluenceReadSchema = z.discriminatedUnion("kind", [
+const sourceIdentifierSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("jira"), id: z.string().regex(/^[A-Z][A-Z0-9]{1,19}-[1-9]\d*$/).max(60) }).strict(),
   z.object({ kind: z.literal("confluence"), id: identifier }).strict(),
 ]);
+export const zenfluenceReadSchema = z.union([
+  sourceIdentifierSchema,
+  z.object({ kind: z.literal("link"), id: z.string().url().max(2048) }).strict(),
+]);
+
+// Resolve an id rather than fetching a pasted URL, so credentials only reach
+// the configured host and the existing project/space checks still apply.
+export function resolveZenfluenceSource(raw: unknown, site: string): z.infer<typeof sourceIdentifierSchema> {
+  const source = zenfluenceReadSchema.parse(raw);
+  if (source.kind !== "link") return source;
+  const url = new URL(source.id);
+  if (url.origin !== site || url.username || url.password) {
+    throw new ZenfluenceError(403, "Use a link from the configured Atlassian site.");
+  }
+  const ticket = /^\/browse\/([A-Z][A-Z0-9]{1,19}-[1-9]\d*)\/?$/.exec(url.pathname);
+  if (ticket) return sourceIdentifierSchema.parse({ kind: "jira", id: ticket[1] });
+  const page = /^\/wiki\/spaces\/[^/]+\/pages\/([1-9]\d*)(?:\/[^/]*)?\/?$/.exec(url.pathname);
+  const pageId = page?.[1] ?? (url.pathname === "/wiki/pages/viewpage.action" ? url.searchParams.get("pageId") : null);
+  if (pageId && /^[1-9]\d{0,29}$/.test(pageId)) return { kind: "confluence", id: pageId };
+  throw new ZenfluenceError(400, "Paste a Jira ticket or Confluence page link, not a board, space or short link.");
+}
 export const zenfluenceCommandSchema = z.object({
   action: z.enum(["read", "attach"]), source: zenfluenceReadSchema,
   runId: z.string().uuid().optional(), expectedRevision: z.number().int().positive().optional(),
@@ -71,7 +92,7 @@ export function createZenfluenceDirectory(raw: unknown, readSetting = setting, f
           settings: { email: { name: entry.emailSetting, configured: emailConfigured }, token: { name: entry.tokenSetting, configured: tokenConfigured } } };
       },
       async read(rawSource: unknown): Promise<ZenfluenceSource> {
-        const source = zenfluenceReadSchema.parse(rawSource);
+        const source = resolveZenfluenceSource(rawSource, entry.site);
         if (source.kind === "jira" && !source.id.startsWith(entry.project + "-")) throw new ZenfluenceError(403, "Choose a ticket in the configured project.");
         const email = readSetting(entry.emailSetting)?.trim(), token = readSetting(entry.tokenSetting)?.trim();
         if (!email || !token) throw new ZenfluenceError(503, "The company Atlassian connection needs credentials on the server.");

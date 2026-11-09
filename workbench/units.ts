@@ -80,7 +80,7 @@ export function stageNodes(snapshot: WorkbenchSnapshot): GraphNode[] {
     const unit = stage.assistantId ? units.find((item) => item.profile.id === stage.assistantId) : undefined;
     const gate = stage.approval ? "Review gate" : "No gate";
     const href = `#/workflows/${stage.id}`;
-    if (!stage.assistantId) return { id: stage.id, label: stage.name, value: stage.agent, note: `By hand · ${gate}`, state: "pending", href };
+    if (!stage.assistantId) return { id: stage.id, label: stage.name, value: stage.agent, note: `${stage.bot && stage.bot.kind !== "manual" ? "Supervised agent" : "By hand"} · ${gate}`, state: stage.bot && stage.bot.kind !== "manual" ? "linked" : "pending", href };
     if (!unit) return { id: stage.id, label: stage.name, value: "Assistant missing", note: gate, state: "broken", href };
     if (!unit.usable) return { id: stage.id, label: stage.name, value: unit.profile.name, note: unit.reason.replace(/\.$/, ""), state: "broken", href };
     return { id: stage.id, label: stage.name, value: unit.profile.name, note: `${unit.working ? "Working · " : ""}${gate}`, state: unit.working ? "active" : "linked", href };
@@ -114,5 +114,6 @@ export function runNodes(run: PipelineRun, jobs?: ScheduledJob[]): GraphNode[] {
 }
 
 export function runStatusLabel(run: PipelineRun): string {
+  if (run.status === "running" && run.stages[run.current]?.status === "awaiting_review") return "Awaiting approval";
   return ({ running: "Running", paused: "Paused", blocked: "Blocked", complete: "Complete", cancelled: "Cancelled" })[run.status];
 }

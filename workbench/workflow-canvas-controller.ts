@@ -79,7 +79,15 @@ export function createWorkflowCanvas(host: CanvasHost) {
       const stage = draft!.config.stages.find(item => item.id === form.dataset.stage);
       if (!stage || stage.assistantId) return;
       // Keep partial typing in memory; the server validates the complete saved configuration.
-      if (input.name === "name" || input.name === "instructions" || input.name === "context" || input.name === "model") stage[input.name] = input.value;
+      if (input.name === "name" || input.name === "instructions" || input.name === "context" || input.name === "model" || input.name === "outputContract") stage[input.name] = input.value;
+      else if (input.name === "inputStages") {
+        stage.inputStages = new FormData(form).getAll("inputStages").map(String);
+        form.querySelector<HTMLSelectElement>('[name="inputMode"]')!.value = stage.inputStages.length ? "selected" : "none";
+      } else if (input.name === "inputMode") {
+        if (input.value === "all") delete stage.inputStages;
+        else stage.inputStages = input.value === "none" ? [] : new FormData(form).getAll("inputStages").map(String);
+        if (input.value !== "selected") for (const checkbox of form.querySelectorAll<HTMLInputElement>('[name="inputStages"]')) checkbox.checked = input.value === "all";
+      }
       else return;
     }
     mark();

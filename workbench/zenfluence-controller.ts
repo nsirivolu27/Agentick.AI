@@ -8,7 +8,7 @@ export function createZenfluenceView(context: {
 }) {
   let scope = "", summary: ZenfluenceSummary | undefined, source: ZenfluenceSource | undefined;
   let error = "", loading = false;
-  let draft = { kind: "jira", id: "", runId: "" };
+  let draft = { kind: "link", id: "", runId: "" };
   async function load() {
     const expected = context.scope(); loading = true;
     try { const next = await context.api("/api/zenfluence") as ZenfluenceSummary; if (context.scope() === expected) { summary = next; error = ""; } }
@@ -16,8 +16,11 @@ export function createZenfluenceView(context: {
     finally { if (context.scope() === expected) { loading = false; context.render(); } }
   }
   return {
+    selectedSource() {
+      return scope === context.scope() && source ? { kind: source.kind, id: source.id } : undefined;
+    },
     page() {
-      if (scope !== context.scope()) { scope = context.scope(); summary = undefined; source = undefined; error = ""; draft = { kind: "jira", id: "", runId: "" }; void load(); }
+      if (scope !== context.scope()) { scope = context.scope(); summary = undefined; source = undefined; error = ""; draft = { kind: "link", id: "", runId: "" }; void load(); }
       return zenfluencePage(summary, source, error, context.runs().filter(run => run.status !== "complete" && run.status !== "cancelled"), loading, draft);
     },
     edit(event: Event) {

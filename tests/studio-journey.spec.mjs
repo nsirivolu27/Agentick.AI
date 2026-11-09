@@ -34,6 +34,7 @@ test("saved template through independently approved workflow handoff", async ({ 
   await expect(page.locator('#agent-studio-editor select[name="model"]')).toHaveValue("demo-scripted");
   await expect(page.locator('#agent-studio-editor input[name="tools"][value="read_project_file"]')).toBeChecked();
   await expect(page.locator('#agent-studio-editor input[name="requireSourceRead"]')).toBeChecked();
+  await page.getByRole("textbox", { name: "Required source paths", exact: true }).fill("SOP.md");
   await page.locator('#agent-studio-editor input[name="name"]').fill("SOP access guide");
   await page.screenshot({ path: `${artifact}/studio-desktop-setup.png`, fullPage: true });
 
@@ -123,6 +124,18 @@ test("saved template through independently approved workflow handoff", async ({ 
   expect(repeatApproval.status()).toBe(409);
 
   await setIdentity(page, "demo.reviewer-two");
+  await workProgress.locator("summary").filter({ hasText: "Request changes" }).click();
+  await workProgress.getByRole("textbox", { name: "Change request", exact: true }).fill("State that the source does not establish a deadline for missing team-owner approval.");
+  await workProgress.getByRole("button", { name: "Return to author", exact: true }).click();
+  await expect(workProgress).not.toContainText("1 of 2 approvals");
+  await setIdentity(page, "demo.operator");
+  await workProgress.getByRole("textbox", { name: "Revised handoff", exact: true }).fill("Reviewed SOP: a routine request needs the team owner's approval. The two-business-day response window does not establish a deadline for obtaining missing team-owner approval.");
+  await workProgress.getByRole("button", { name: "Resubmit for review", exact: true }).click();
+  await expect(workProgress).toContainText("0 of 2 approvals");
+  await setIdentity(page, "demo.reviewer-one");
+  await workProgress.getByRole("button", { name: "Approve this handoff", exact: true }).click();
+  await expect(workProgress).toContainText("1 of 2 approvals");
+  await setIdentity(page, "demo.reviewer-two");
   await workProgress.getByRole("button", { name: "Approve this handoff", exact: true }).click();
   await expect(workProgress).toContainText("Approved");
   const complete = await page.request.get("/api/workspace", { headers: { authorization: "Bearer demo.reviewer-two" } });
@@ -131,7 +144,74 @@ test("saved template through independently approved workflow handoff", async ({ 
   const completedRun = completeSnapshot.pipelines.runs.find(item => item.id === run.id);
   expect(completedRun.status).toBe("complete");
   expect(completedRun.stages[1].approvals).toEqual(["demo.reviewer-one", "demo.reviewer-two"]);
+  expect(completedRun.stages[1].revisions).toHaveLength(3);
+  expect(completedRun.stages[1].approvalRecords.every(record => record.version === 3)).toBe(true);
+  const auditResponse = await page.request.get(`/api/audit-package?run=${run.id}`, { headers: { authorization: "Bearer demo.reviewer-two" } });
+  expect(auditResponse.ok()).toBe(true);
+  const audit = await auditResponse.json();
+  expect(audit.toolActivity.some(activity => activity.events.some(event => event.message.includes("SOP.md")))).toBe(true);
+  expect(Object.values(audit.sourceHistory).flat().some(source => source.kind === "project-file" && source.path === "SOP.md" && source.content.includes("team owner's approval"))).toBe(true);
   expect(pageErrors).toEqual([]);
+});
+
+test("test portal compares frozen inputs and refuses a passing review for failed assertions", async ({ page }) => {
+  await page.goto("/#/agent-studio");
+  await page.locator(".agent-studio-card h2 a").first().click();
+  await page.locator(".agent-studio-nav").getByRole("link", { name: "Test", exact: true }).click();
+  const run = async () => {
+    await page.getByRole("button", { name: "Run test", exact: true }).first().click();
+    await expect(page.locator(".agent-test-result .agent-test-status")).toContainText("Execution finished", { timeout: 30000 });
+  };
+  await run(); await run();
+  await expect(page.getByText(/Same saved inputs, suite and frozen source hashes/)).toBeVisible();
+  await expect(page.locator(".agent-test-result")).toContainText("source_read: SOP.md");
+  await page.locator("summary").filter({ hasText: "Frozen source evidence" }).click();
+  await expect(page.locator(".agent-test-result")).toContainText('"sha256"');
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.locator("summary").filter({ hasText: "Automatic assertions" }).click();
+  await page.getByRole("textbox", { name: "Assertions JSON", exact: true }).fill('[{"kind":"contains","value":"NO_SUCH_PHRASE_IN_THE_SOURCE"}]');
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.locator(".agent-test-result")).toContainText("Out of date.");
+  await run();
+  await expect(page.locator(".agent-test-result")).toContainText("Failed");
+  await page.getByRole("radio", { name: "Pass", exact: true }).check();
+  await page.getByRole("button", { name: "Record review", exact: true }).click();
+  await expect(page.locator("#notice")).toContainText("Failed execution or assertions");
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: `${artifact}/test-portal-failed-assertion-390.png`, fullPage: true });
+  expect((await accessibility(page)).violations).toEqual([]);
+});
+
+test("canvas input bindings and output contracts survive save and reload", async ({ page }) => {
+  await page.goto("/#/canvas");
+  await page.locator(".canvas-node-select").nth(1).click();
+  const form = page.locator("#canvas-stage-form");
+  await form.getByRole("combobox", { name: "Output inputs", exact: true }).selectOption("none");
+  await form.getByRole("textbox", { name: "Output contract", exact: true }).fill("Cite selected evidence and list missing facts.");
+  await page.getByRole("button", { name: "Save workflow", exact: true }).click();
+  await expect(page.locator("#notice")).toContainText("Workflow saved");
+  await page.reload();
+  await page.locator(".canvas-node-select").nth(1).click();
+  await expect(form.getByRole("combobox", { name: "Output inputs", exact: true })).toHaveValue("none");
+  await expect(form.getByRole("textbox", { name: "Output contract", exact: true })).toHaveValue("Cite selected evidence and list missing facts.");
+  await form.locator('input[name="inputStages"]').first().check();
+  await expect(form.getByRole("combobox", { name: "Output inputs", exact: true })).toHaveValue("selected");
+  await page.getByRole("button", { name: "Save workflow", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save workflow", exact: true })).toBeDisabled();
+  await page.reload();
+  await page.locator(".canvas-node-select").nth(1).click();
+  await expect(form.locator('input[name="inputStages"]').first()).toBeChecked();
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      `canvas overflows at ${width}px`).toBe(true);
+  }
+  await page.screenshot({ path: `${artifact}/workflow-bindings-390.png`, fullPage: true });
+  expect((await accessibility(page)).violations).toEqual([]);
 });
 
 test("services, preferences, keyboard access, and responsive pages", async ({ page }) => {
@@ -155,7 +235,7 @@ test("services, preferences, keyboard access, and responsive pages", async ({ pa
   await expect(page.locator("#theme-select")).toHaveValue("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
-  for (const width of [1440, 390, 360]) {
+  for (const width of [1440, 1024, 768, 390, 360]) {
     await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
     await expect(page.locator("#title")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
@@ -165,4 +245,14 @@ test("services, preferences, keyboard access, and responsive pages", async ({ pa
   await page.screenshot({ path: `${artifact}/studio-mobile-390.png`, fullPage: true });
   const audit = await accessibility(page);
   expect(audit.violations).toEqual([]);
+  await page.goto("/#/agent-studio/new?preset=public-analyst");
+  await expect(page.getByRole("textbox", { name: "Required source paths", exact: true }))
+    .toHaveValue("examples/ontology/openfema/data/virginia-snapshot.json");
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      `analyst setup overflows at ${width}px`).toBe(true);
+  }
+  await page.screenshot({ path: `${artifact}/studio-public-analyst-390.png`, fullPage: true });
+  expect((await accessibility(page)).violations).toEqual([]);
 });

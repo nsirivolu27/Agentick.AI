@@ -13,7 +13,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/stdio.mjs",
     "start:http": "node --enable-source-maps ./dist/http-main.mjs",
-    "test": "tsc -p tsconfig.test.json && node --test .testbuild/tests/*.test.js",
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=2 .testbuild/tests/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "agents": "node ./dist/list.mjs",
     "build:workbench": "node ./workbench/build.mjs",
@@ -21,7 +21,10 @@
     "dev:workbench": "node ./workbench/dev.mjs",
     "demo:workbench": "node ./dist/workbench/demo.mjs",
     "demo:openfema": "node ./dist/workbench/agent-demo.mjs --openfema",
+    "start:analyst": "node ./workbench/start-analyst.mjs",
+    "start:demo": "node ./workbench/start-demo.mjs",
     "audit:verify": "node ./dist/workbench/audit-verify-main.mjs",
+    "workflow:backup": "node ./dist/workbench/workspace-backup-main.mjs",
     "demo:agents": "node ./dist/workbench/agent-demo.mjs",
     "seed:state": "tsc -p tsconfig.test.json && node .testbuild/workspaces/seed-state.js",
     "build:desktop": "node ./workbench/desktop/build.mjs",
@@ -30,6 +33,7 @@
     "ontology:ingest": "node ./dist/workbench/ontology-ingest-main.mjs",
     "company:workbench": "node ./dist/workbench/company-main.mjs",
     "local:workbench": "node ./dist/workbench/local-main.mjs",
+    "start:local": "node ./workbench/start-local.mjs",
     "test:mcp": "tsc -p tsconfig.test.json && node --test .testbuild/tests/workflow.test.js .testbuild/tests/mcp-portal.test.js .testbuild/tests/pipeline.test.js .testbuild/tests/bot-timeline.test.js .testbuild/tests/mcp-policy.test.js .testbuild/tests/local-session.test.js .testbuild/tests/local-workspaces.test.js .testbuild/tests/jira.test.js .testbuild/tests/jira-actions.test.js .testbuild/tests/jira-operations.test.js .testbuild/tests/jira-runtime.test.js .testbuild/tests/jira-api.test.js"
   },
   "dependencies": {

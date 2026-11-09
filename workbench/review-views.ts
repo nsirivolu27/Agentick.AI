@@ -144,6 +144,15 @@ export function activityPage(snapshot: WorkbenchSnapshot, projectFilter?: string
       rows.push({ at: event.at, actor: event.actor, summary: text.summary, object: text.object, ...(text.from ? { from: text.from } : {}), ...(text.to ? { to: text.to } : {}), href: text.href, detail: event.detail, technical: `${event.entity} ${event.entityId}`, workspace: snapshot.workspaceId });
     }
   }
+  if (!projectFilter) {
+    for (const run of snapshot.pipelines?.runs ?? []) {
+      if (run.workspaceId !== snapshot.workspaceId) continue;
+      for (const event of run.events) rows.push({ at: event.at, actor: event.actor,
+        summary: event.action.replaceAll("_", " "), object: run.title,
+        href: `#/desk/${run.id}`, detail: event.detail,
+        technical: `workflow ${run.id} · stage ${event.stage} · event ${event.id}`, workspace: run.workspaceId });
+    }
+  }
   // A project filter shows Model Studio events only; registry events belong to agents.
   if (projectFilter) rows.splice(0, rows.length, ...rows.filter((row) => !row.technical.startsWith("definition")));
   rows.sort((a, b) => b.at.localeCompare(a.at));
@@ -152,11 +161,11 @@ export function activityPage(snapshot: WorkbenchSnapshot, projectFilter?: string
     rows.map((row) => ({ cells: [
       `<span class="dim" title="${when(row.at)}">${ago(row.at)}</span>`,
       escape(row.actor),
-      `${escape(row.summary)} <strong>${escape(row.object)}</strong>${row.detail ? `<small>${escape(row.detail)}</small>` : ""}<details class="more bare"><summary>Technical details</summary><small><code class="hash wrap">${escape(row.technical)} · ${when(row.at)}</code></small></details>`,
+      `${escape(row.summary)} <strong>${escape(row.object)}</strong>${row.detail ? more("Event details", `<p>${escape(row.detail)}</p>`) : ""}<details class="more bare"><summary>Technical details</summary><small><code class="hash wrap">${escape(row.technical)} · ${when(row.at)}</code></small></details>`,
       transition(row.from, row.to),
       escape(row.workspace),
       row.href ? `<a href="${escape(row.href)}">Open</a>` : "",
     ] })), { label: "Activity", compact: true }) : empty("No activity recorded yet.");
-  return { title: project ? `Activity · ${project.name}` : "Activity", ...(project ? { crumbs: [["Activity", "#/activity"]] as [string, string][] } : {}), context: "Every change, who made it and what state it produced. Newest first.", body };
+  return { title: project ? `Activity · ${project.name}` : "Activity", ...(project ? { crumbs: [["Activity", "#/activity"]] as [string, string][] } : {}), context: "Recorded workflow, agent registry and model-release events. Newest first.", body };
 }
 

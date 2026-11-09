@@ -12,6 +12,8 @@ export function workflowCanvasPage(snapshot: WorkbenchSnapshot, draft: CanvasDra
   const stale = draft.version !== snapshot.pipelines.version;
   const disabled = !admin ? "disabled" : "";
   const selected = config.stages.find(stage => stage.id === draft.selected) ?? config.stages[0]!;
+  const previous = config.stages.slice(0, config.stages.findIndex(stage => stage.id === selected.id));
+  const inputMode = selected.inputStages === undefined ? "all" : selected.inputStages.length ? "selected" : "none";
   const savedStage = snapshot.pipelines.config.stages.find(stage => stage.id === selected.id);
   const agents = canvasAgents(config);
   const available = models.filter(model => model.available);
@@ -36,6 +38,9 @@ export function workflowCanvasPage(snapshot: WorkbenchSnapshot, draft: CanvasDra
         <label>Model<select name="model">${!selectedModel ? `<option value="${escape(selected.model)}" selected>${escape(selected.model)} · check connection</option>` : ""}${available.map(model => `<option value="${escape(model.id)}" ${model.id === selected.model ? "selected" : ""}>${escape(model.label)}</option>`).join("")}</select></label>
         <label>Instructions<textarea name="instructions" rows="5" maxlength="4000" required>${escape(selected.instructions)}</textarea></label>
         <label>Context<textarea name="context" rows="2" maxlength="2000">${escape(selected.context)}</textarea></label>
+        <label>Output inputs<select name="inputMode"><option value="all" ${inputMode === "all" ? "selected" : ""}>All completed prior stages</option><option value="selected" ${inputMode === "selected" ? "selected" : ""}>Selected prior stages</option><option value="none" ${inputMode === "none" ? "selected" : ""}>No prior stage outputs</option></select></label>
+        <fieldset><legend>Input bindings</legend>${previous.length ? previous.map(stage => `<label class="checkbox"><input type="checkbox" name="inputStages" value="${escape(stage.id)}" ${selected.inputStages === undefined || selected.inputStages.includes(stage.id) ? "checked" : ""}>${escape(stage.name)} <code>${escape(stage.id)}</code></label>`).join("") : '<p class="text-3">The first stage has the work item and references, but no earlier outputs.</p>'}</fieldset>
+        <label>Output contract<textarea name="outputContract" rows="3" maxlength="2000">${escape(selected.outputContract ?? "")}</textarea></label><small>Describe the evidence and format reviewers require. This is a human-reviewed contract, not an automatic correctness claim.</small>
       </fieldset><p class="canvas-gate">${selected.approval ? "◎ Human review required" : "Direct handoff"}</p><p class="text-3">${selected.assistantId ? "Approved assistant binding is retained. Use workflow settings to change it." : "Stage edits stay in this draft until you save the workflow."}</p></form>
       <details><summary>Access & limits</summary><p>${escape(selected.bot?.allowedTools?.join(", ") ?? "Existing stage policy")}</p><p>${selected.bot ? `${selected.bot.maxSteps} model calls · ${selected.bot.timeoutSeconds}s limit` : "Manual stage"}</p><p>Jira status: ${escape(selected.jiraStatus)}</p></details>
       <button class="secondary" data-canvas-remove="${escape(selected.id)}" ${!admin || savedStage?.approval || savedStage?.assistantId || config.stages.length === 1 ? "disabled" : ""}>Remove stage</button><p class="text-3">Saved review gates and approved assistant stages cannot be removed here.</p>

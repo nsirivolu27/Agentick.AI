@@ -202,6 +202,23 @@ export function createModelStudio(options: StudioOptions): ModelStudio {
       if (!verdict.passed || canonical(verdict.comparison) !== canonical(evaluation.comparison)) throw stale("the evaluation verdict", "Run the evaluation again.");
     };
 
+    const verifyRelease = (release: ModelRelease) => {
+      const project = find(state.projects, release.projectId, "Project");
+      const job = find(state.jobs, release.jobId, "Training job");
+      const config = find(state.configs, job.configId, "Training configuration");
+      const evaluation = find(state.evaluations, release.evaluationId, "Evaluation");
+      if (!job.artifact || job.status !== "succeeded" || !evaluation.passed ||
+        job.projectId !== project.id || config.projectId !== project.id ||
+        evaluation.projectId !== project.id || evaluation.jobId !== job.id) {
+        throw new StudioError(409, "The release's evaluation or artifact is no longer eligible.");
+      }
+      verifyEvidence(project, config, evaluation, job.artifact);
+      const hash = hashRelease({ projectId: project.id, jobId: job.id, configHash: config.hash,
+        artifact: job.artifact, evaluationId: evaluation.id, metrics: evaluation.metrics, passed: evaluation.passed });
+      if (hash !== release.contentHash) throw new StudioError(409, "The release's reviewed content changed. Request a new release.");
+      return project;
+    };
+
     switch (command.action) {
       case "create_project": {
         requireAuthor();
@@ -378,6 +395,7 @@ export function createModelStudio(options: StudioOptions): ModelStudio {
         // does not change that; only the deployment policy can.
         if (release.requestedBy === actor && !release.allowSelfApproval) throw new StudioError(403, "You requested this release, so you cannot approve it.");
         if (release.approvals.some((approval) => approval.actor === actor)) throw new StudioError(409, "You have already approved this release.");
+        verifyRelease(release);
         release.approvals.push({ actor, at, contentHash: release.contentHash, ...(command.note ? { note: command.note } : {}) });
         const valid = validApproversOf(release);
         if (valid.length >= release.requiredApprovals) release.status = "approved";
@@ -415,7 +433,8 @@ export function createModelStudio(options: StudioOptions): ModelStudio {
         requireAuthor();
         const release = find(state.releases, command.releaseId, "Release");
         if (release.status !== "approved") throw new StudioError(409, "Only an approved release can be assigned to a chatbot profile.");
-        const project = find(state.projects, release.projectId, "Project");
+        if (validApproversOf(release).length < release.requiredApprovals) throw new StudioError(409, "This release no longer has enough valid approvals.");
+        const project = verifyRelease(release);
         if (state.profiles.some((profile) => profile.name.toLowerCase() === command.name.toLowerCase() && profile.status === "active")) {
           throw new StudioError(409, "An active profile with this name already exists.");
         }

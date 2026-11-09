@@ -88,6 +88,7 @@ test("saved analyst request, real trace, limited county and independent pending 
   await expect(page.getByRole("heading", { name: "Execution: completed · limited source", exact: true })).toBeVisible();
   await expect(page.locator(".analyst-trace > li")).toHaveCount(2);
   await expect(page.locator(".analyst-columns")).toContainText("does not establish that the county was unaffected");
-  await page.screenshot({ path: `${artifacts}/limited-county.png`, fullPage: true });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: `${artifacts}/limited-county.png` });
   expect(errors).toEqual([]);
 });
