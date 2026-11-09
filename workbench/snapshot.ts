@@ -18,6 +18,7 @@ export type RecordView = RegistryRecord & { hash: string; eligible: boolean; val
 
 /** Everything GET /api/workspace returns. The pages render from this and nothing else. */
 export interface WorkbenchSnapshot {
+  analyst?: import("./analyst-runtime.js").AnalystSnapshot;
   ontology?: OntologyCatalog;
   pipelines?: PipelineSnapshot;
   jira?: { canReview: boolean };

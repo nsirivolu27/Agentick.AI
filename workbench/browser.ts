@@ -42,6 +42,7 @@ import { jiraReviewView, jiraHistoryView, type JiraReview, type JiraHistory } fr
 import { pipelineView } from "./pipeline-view.js";
 import type { PipelineSnapshot, PipelineConfig } from "./pipeline.js";
 import { emptyStudioUi, studioListPage, studioProjectPage, type Page, type StudioUi } from "./studio-view.js";
+import { analystPage } from "./analyst-view.js";
 import { documentsPage } from "./documents-view.js";
 import { activityPage, approvalDetailPage, approvalsQueuePage, evaluationDetailPage, evaluationsListPage } from "./review-views.js";
 import { assistantDetailPage, assistantsListPage, WORKSPACE_ASSISTANT } from "./assistants-view.js";
@@ -162,7 +163,7 @@ themeSelect.addEventListener("change", () => {
  * the back button, a reload and a pasted link all land in the same place.
  */
 interface Route { view: string; id?: string; sub?: string; query: URLSearchParams }
-const PRIMARY_VIEWS = ["zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
+const PRIMARY_VIEWS = ["analyst", "zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
 const LEGACY_VIEWS = ["desk", "pipelines", "agents", "email", "mcp", "workflow", "chat"];
 function parseRoute(hash: string): Route {
   const [path, search = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -347,6 +348,7 @@ function render(): void {
 /** The six primary pages, from the route and the snapshot. */
 function currentPage(): Page {
   switch (view) {
+    case "analyst": return analystPage(snapshot, route.id, studioUi);
     case "zenfluence": return zenfluence.page();
     case "base-chat":
     case "chat": {
@@ -1196,9 +1198,36 @@ async function workflowCommand(data: unknown, draftKey?: string): Promise<void> 
 let scheduleWatch: ReturnType<typeof setTimeout> | undefined;
 function watchSchedule(): void {
   clearTimeout(scheduleWatch); scheduleWatch = undefined;
-  const active = snapshot.schedule?.jobs.some((job) => job.status === "queued" || job.status === "running");
-  if (active && !busy) scheduleWatch = setTimeout(() => { void refresh().catch(() => undefined); }, 4000);
+  const analystActive = view === "analyst" && snapshot.analyst?.jobs.some(job => job.id === route.id && ["queued", "running"].includes(job.status));
+  const active = snapshot.schedule?.jobs.some((job) => job.status === "queued" || job.status === "running") || analystActive;
+  if (active && !busy) scheduleWatch = setTimeout(() => { void refresh().catch(error => notify((error as Error).message, true)); }, analystActive ? 1000 : 4000);
 }
+document.addEventListener("submit", async event => {
+  const form = event.target as HTMLFormElement;
+  if (form.id !== "analyst-request") return;
+  event.preventDefault(); if (busy) return;
+  const fields = new FormData(form); const workspace = selectedWorkspace; const actor = snapshot.actor;
+  lock(true);
+  try {
+    const job = await api("/api/analyst", { action: "start", requestId: form.dataset.requestId ??= crypto.randomUUID(),
+      area: String(fields.get("area")), county: String(fields.get("county") ?? ""),
+      question: String(fields.get("question")), scope: String(fields.get("scope")) }) as { id: string };
+    if (workspace !== selectedWorkspace || actor !== snapshot.actor) return;
+    delete studioUi.drafts["analyst-request"];
+    navigate(`#/analyst/${job.id}`); await refresh();
+  } catch (error) { if (workspace === selectedWorkspace && actor === snapshot.actor) notify((error as Error).message, true); }
+  finally { lock(false); if (workspace === selectedWorkspace && actor === snapshot.actor) watchSchedule(); }
+});
+document.addEventListener("click", async event => {
+  const button = (event.target as Element).closest<HTMLButtonElement>("[data-analyst-action]");
+  if (!button || busy) return;
+  const workspace = selectedWorkspace; const actor = snapshot.actor; lock(true);
+  try {
+    await api("/api/analyst", { action: button.dataset.analystAction, id: button.dataset.analystId });
+    if (workspace === selectedWorkspace && actor === snapshot.actor) await refresh();
+  } catch (error) { if (workspace === selectedWorkspace && actor === snapshot.actor) notify((error as Error).message, true); }
+  finally { lock(false); if (workspace === selectedWorkspace && actor === snapshot.actor) watchSchedule(); }
+});
 document.addEventListener("submit", (event) => {
   const target = event.target as HTMLFormElement;
   if (!target.id.startsWith("pipeline-") && target.id !== "desk-start") return;
