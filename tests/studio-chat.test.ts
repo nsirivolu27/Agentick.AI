@@ -103,7 +103,7 @@ test("an approved profile answers through /api/chat and its instructions reach t
   const plain = await f.post("writer", "/api/chat", { messages: [{ role: "user", content: "Hi" }] });
   assert.equal(plain.status, 200);
   await plain.text();
-  assert.match(f.prompts[1]!, /You are Agentick/);
+  assert.match(f.prompts[1]!, /You are Magentic/);
   assert.doesNotMatch(f.prompts[1]!, /Repo bot/);
 });
 

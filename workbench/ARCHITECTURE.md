@@ -1,6 +1,6 @@
 # MCP workflow architecture and verification
 
-Agentick is being built as an installed developer workspace. Desktop packaging
+Magentic is being built as an installed developer workspace. Desktop packaging
 is deferred while the MCP and workflow layers are completed. The loopback UI
 is the development and verification surface; public browser access is not part
 of this milestone.
@@ -19,7 +19,7 @@ of this milestone.
 | Developer space | `desk-view.ts`, `pipeline-view.ts`, `bot-view.ts`, `browser.ts` | Task composer, saved sessions, review queue, bot timeline, changes and checks. |
 | External automation | `pipeline.ts` Jira previews; LNKZ REST boundary | Jira and email delivery are not live. External connectors and conversation storage remain owned by LNKZ. |
 
-The workspace store owns Agentick's run and configuration records. It does not
+The workspace store owns Magentic's run and configuration records. It does not
 replace the relay's conversation store or authentication system.
 
 ## Execution path
@@ -136,10 +136,9 @@ $env:MAGENTIC_LLM_BASE_URL = 'http://127.0.0.1:11434'
 corepack pnpm local:workbench
 ```
 
-Open the printed loopback address. Model execution additionally needs a reachable
-Ollama service and the selected downloaded model. Workbench chat and bots use the
-native Ollama HTTP API; the standalone relay's optional retrieval adapters are
-unchanged. Automated policy tests do not establish model quality or live provider
+Open the printed loopback address. Model execution additionally needs Ollama,
+the selected downloaded model and the existing optional `@langchain/ollama`
+adapter. Automated policy tests do not establish model quality or live provider
 availability. Do not use a real project to test deliberately failing commands.
 
 ### The documentation portal
@@ -565,27 +564,6 @@ rest of the workspace still loads.
 **Not in this phase.** Real training providers and their credentials, model
 quality evaluators, dataset uploads larger than the request body, per project
 membership, and any deployment work.
-
-## Agent Studio tests
-
-A saved agent carries no version of its own; `agentHash` in
-`agent-tests-model.ts` fingerprints the fields that change its behaviour
-(name, purpose, model, instructions, policy) so a test result can say which
-version it exercised. `agent-tests.ts` keeps test cases and runs per
-workspace, one JSON file under `agent-tests/` written through `atomicJson`,
-memory only in the scripted demo. A run builds a one stage trial run in
-memory and executes `runBotWorker` with the agent's policy against the
-attached repository: the same worker, tools, limits and required read rule a
-stage would use, with nothing written to the workflow. The worker logs
-`Source read`, `Source empty` and `Source missing` after each file read, and
-the run rebuilds structured tool calls from that log rather than trusting the
-answer. Execution status, provider reported usage and a reviewer's verdict are
-three separate fields; a run that finished can still be reviewed as a fail, and
-a run that failed offers no review. Refusals come before any model call and
-name the fix: stale configuration version, unconnected model, missing or empty
-source, a source named for an agent that cannot read files. Roles are checked
-on the server: authors and admins write and run tests, approvers and admins
-review, every command is scoped to the caller's workspace.
 
 ## Workbench interface
 

@@ -1,23 +1,18 @@
-AGENTICK DEVELOPER — WINDOWS PREVIEW
+MAGENTIC DEVELOPER — WINDOWS PREVIEW
 
 A local developer space for configurable workflows, agents, chat, and MCP.
-What changed in this version and known limitations: RELEASE-NOTES.txt.
-The package version is in version.json.
 
 INSTALL
 1. Extract the entire ZIP into a folder.
 2. Double-click Install.cmd, or use Windows PowerShell:
    powershell.exe -NoProfile -File .\Install.ps1
-3. Open Agentick Developer from the Start menu.
+3. Open Magentic Developer from the Start menu.
 
 Microsoft Edge must be installed. Node 22 and the Ollama adapter are bundled;
 you do not need pnpm or a terminal to launch the installed application.
-The installer uses the current user's LocalAppData directory and Start menu,
-and lists Agentick Developer in Apps & features. It refuses to overwrite an
-existing installation: uninstall first, then install the new package. Saved
-workspaces are kept across that. With MAGENTIC_UPDATE_FEED set, app.log says
-when a newer package is available. This preview is unsigned; follow your
-organization's script policy. Do not disable security protections.
+The installer uses the current user's LocalAppData directory and Start menu.
+It refuses to overwrite an existing installation. This preview is unsigned;
+follow your organization's script policy. Do not disable security protections.
 
 HOW IT RUNS
 The application uses Edge's browser engine in a dedicated application window.
@@ -25,8 +20,7 @@ Its Node backend starts automatically on a random loopback port and stops when
 the application window process exits. No hosted website or public listener is
 created. Another copy cannot start while its launcher is running.
 
-Ollama and model downloads are separate installations; when Ollama is not
-running the chat page lists the steps to set it up. Cloud providers require
+Ollama and model downloads are separate installations. Cloud providers require
 your own credentials and internet access. Email and Jira remain previews.
 The application opens saved local workspaces. Create and select projects in
 the workspace panel; records and pipeline runs survive normal shutdown and
@@ -47,14 +41,13 @@ If the browser session expires, close and reopen the application.
 
 If startup fails, the launcher displays an error and points to error.log in
 the same data directory. A corrupt workspace is never replaced with sample
-data. After a forced kill, verify that no Agentick backend is running before
+data. After a forced kill, verify that no Magentic backend is running before
 removing data\workspaces\.writer.lock. Normal shutdown releases this lock.
 Local disk operation is supported; network-drive, sync-folder and power-loss
 recovery are not verified.
 
 UNINSTALL
-Close Agentick Developer, then remove it from Apps & features, or double-click
-Uninstall.cmd in the application folder. Browser profile, saved workspaces and
-logs remain under %LOCALAPPDATA%\MagenticDeveloper\data; run
-Uninstall.ps1 -RemoveData in Windows PowerShell to delete those as well.
+Close Magentic Developer. Remove the Magentic Developer Start menu shortcut
+and the application folder shown by the installer. Browser profile, saved workspaces and logs
+remain separately under %LOCALAPPDATA%\MagenticDeveloper\data.
 No system service, startup task, firewall rule, or cloud resource is installed.

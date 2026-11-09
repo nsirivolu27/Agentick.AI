@@ -98,7 +98,7 @@ commit also refuses to replace a document that names a different workspace.
 **Lock recovery.** The lock is one exclusive file create. There is no
 automatic stale reclamation, because a PID can be reused and handing two
 writers one directory is worse than refusing to start. If the application was
-killed, verify that no Agentick backend is still running before removing
+killed, verify that no Magentic backend is still running before removing
 `<data>/.writer.lock` and starting again. Normal shutdown removes
 the lock only if it still names this instance.
 

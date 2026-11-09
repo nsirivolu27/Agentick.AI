@@ -1,18 +1,12 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { setting } from "../../env.js";
 import { startRuntime, stopRuntime, edgeArguments } from "./runtime.js";
-import { checkForUpdate, describe } from "./update.js";
 
 const root = fileURLToPath(new URL("./", import.meta.url));
-const version = JSON.parse(await readFile(join(root, "version.json"), "utf8")) as { version: string; runtime: string };
-console.log(`Agentick Developer ${version.version} (built with Node ${version.runtime}, running ${process.version})`);
-// One read of the update feed when a feed is configured; the result goes to the log and never delays the window.
-const feed = setting("MAGENTIC_UPDATE_FEED")?.trim();
-if (feed) void checkForUpdate(feed, version.version).then(check => console.log(describe(check, version.version)));
 const smoke = process.argv.includes("--smoke-test");
 const data = join(setting("LOCALAPPDATA") ?? join(homedir(), "AppData", "Local"), "MagenticDeveloper", "data");
 let edge: string | undefined;
@@ -34,7 +28,7 @@ process.once("SIGINT", shutdown); process.once("SIGTERM", shutdown);
 try {
   if (smoke) {
     const page = await fetch(runtime.url);
-    if (!page.ok || !(await page.text()).includes("Agentick Developer")) throw new Error("Developer UI is unavailable.");
+    if (!page.ok || !(await page.text()).includes("Magentic Developer")) throw new Error("Developer UI is unavailable.");
     const cookie = page.headers.get("set-cookie")?.split(";")[0];
     if (!demo && !cookie) throw new Error("Local browser session was not established.");
     const response = await fetch(new URL("api/workspace", runtime.url), { headers: demo ? { Authorization: "Bearer alex.writer" } : { Cookie: cookie! } });
@@ -49,7 +43,7 @@ try {
     if (typeof module.ChatOllama !== "function") throw new Error("The bundled Ollama adapter is unavailable.");
     console.log("Desktop package smoke check passed: UI, workspace API, and Ollama adapter.");
   } else {
-    console.log(`Agentick Developer local MCP: ${runtime.url}api/pipeline-mcp`);
+    console.log(`Magentic Developer local MCP: ${runtime.url}api/pipeline-mcp`);
     await new Promise<void>((resolve, reject) => {
       const window = spawn(edge!, edgeArguments(runtime.url, join(data, "browser")), { windowsHide: false, stdio: "ignore" });
       window.once("error", reject);

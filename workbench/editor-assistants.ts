@@ -35,7 +35,7 @@ export function workbenchTokenFile(env: NodeJS.ProcessEnv = process.env, platfor
 export async function readWorkbenchToken(file: string): Promise<string> {
   let token: string;
   try { token = (await readFile(file, "utf8")).trim(); }
-  catch { throw new Error(`No workbench token at ${file}. Start Agentick Developer once so it creates one, or set magentic.workbenchTokenFile.`); }
+  catch { throw new Error(`No workbench token at ${file}. Start Magentic Developer once so it creates one, or set magentic.workbenchTokenFile.`); }
   if (!token) throw new Error(`The workbench token file ${file} is empty.`);
   return token;
 }
@@ -43,7 +43,7 @@ export async function readWorkbenchToken(file: string): Promise<string> {
 /** The workbench URL must be this machine. A token is never sent anywhere else. */
 export function workbenchEndpoint(url: string): URL {
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new Error("Set magentic.workbenchUrl to the address Agentick Developer shows, such as http://127.0.0.1:4173."); }
+  try { parsed = new URL(url); } catch { throw new Error("Set magentic.workbenchUrl to the address Magentic Developer shows, such as http://127.0.0.1:4173."); }
   if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new Error("magentic.workbenchUrl must be a loopback http address; the workbench runs on this machine only.");
   return new URL("/api/pipeline-mcp", parsed);
 }
@@ -60,8 +60,8 @@ async function call(url: string, token: string, tool: string, args: Record<strin
     if (response.isError) throw new Error(typeof value === "object" && value && "error" in value ? String((value as { error: unknown }).error) : "The workbench refused the request.");
     return value;
   } catch (error) {
-    if (error instanceof Error && /fetch failed|ECONNREFUSED|ENOTFOUND/.test(error.message)) throw new Error(`Cannot reach the workbench at ${url}. Start Agentick Developer and check magentic.workbenchUrl.`);
-    if (error instanceof Error && /401|403|Unauthorized|access token/.test(error.message)) throw new Error("The workbench refused the token. Restart Agentick Developer or point magentic.workbenchTokenFile at its current token.");
+    if (error instanceof Error && /fetch failed|ECONNREFUSED|ENOTFOUND/.test(error.message)) throw new Error(`Cannot reach the workbench at ${url}. Start Magentic Developer and check magentic.workbenchUrl.`);
+    if (error instanceof Error && /401|403|Unauthorized|access token/.test(error.message)) throw new Error("The workbench refused the token. Restart Magentic Developer or point magentic.workbenchTokenFile at its current token.");
     throw error;
   } finally {
     await client.close().catch(() => undefined);
