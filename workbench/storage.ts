@@ -1,10 +1,9 @@
-import { automationRecordSchema, type AutomationRecord } from "./automation-schema.js";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { materialSchema, materialsSchema } from "./materials.js";
+import { materialsSchema } from "./materials.js";
 import { setting } from "../env.js";
 import { pipelineSchema, type PipelineConfig, type PipelineRun } from "./pipeline.js";
 import { dedupeKeyFor, hashIntent, jiraIntentSchema, type PendingJiraAction } from "./jira.js";
@@ -76,7 +75,7 @@ const jiraSchema = z.object({
 const runSchema = z.object({
   id: z.string().uuid(), requestId: z.string().uuid(), workspaceId: z.string().min(1),
   owner: z.string().min(1).max(200), title: z.string().min(1), brief: z.string().min(1),
-  workflowSource: materialSchema.optional(), materials: materialsSchema.optional(), issueKey: z.string().nullable(), config: pipelineSchema, version: z.number().int().min(1),
+  materials: materialsSchema.optional(), issueKey: z.string().nullable(), config: pipelineSchema, version: z.number().int().min(1),
   revision: z.number().int().min(1), requiredApprovals: z.number().int().min(1).max(10),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   status: z.enum(["running", "paused", "blocked", "complete", "cancelled"]),
@@ -115,7 +114,6 @@ const documentSchema = z.object({
   // written before Jira actions existed still loads, which is why the
   // storage version did not have to change.
   jiraActions: z.array(jiraActionSchema).max(500).default([]),
-  automationActions: z.array(automationRecordSchema).max(500).default([]),
 }).strict();
 
 /**
@@ -132,7 +130,6 @@ export interface WorkspaceState {
   config: PipelineConfig; version: number; runs: PipelineRun[];
   /** Durable Jira actions. Absent in documents written before they existed. */
   jiraActions?: PendingJiraAction[];
-  automationActions?: AutomationRecord[];
 }
 export interface WorkspaceDocument extends WorkspaceState { storageVersion: number; workspaceId: string }
 
@@ -151,16 +148,6 @@ function assertCoherent(document: WorkspaceDocument, workspace: string): void {
 
   if (document.workspaceId !== workspace) {
     fail(`it is labelled ${document.workspaceId}.`);
-  }
-
-  const automationIds = new Set<string>();
-  const automationKeys = new Set<string>();
-  for (const action of document.automationActions ?? []) {
-    const run = document.runs.find(item => item.id === action.runId);
-    if (action.workspaceId !== workspace || !run || !run.config.stages.some(stage => stage.id === action.stageId)) fail("Automation action references another workspace or stage.");
-    if (automationIds.has(action.id) || automationKeys.has(action.dedupeKey)) fail("Duplicate automation action.");
-    if ((action.status === "running") === Boolean(action.finishedAt)) fail("Automation action has an inconsistent finish time.");
-    automationIds.add(action.id); automationKeys.add(action.dedupeKey);
   }
 
   const seenActionIds = new Set<string>();
@@ -294,7 +281,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
     if ((cause as { code?: string }).code === "EEXIST") {
       throw new StorageError(
         `Another instance is already using ${directory}. Close it and try again. `
-        + `If no Agentick process is running, delete ${lockPath} and retry.`,
+        + `If no Magentic process is running, delete ${lockPath} and retry.`,
       );
     }
     throw new StorageError(`Could not take the writer lock in ${directory}.`, { cause });
@@ -336,7 +323,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
       if (envelope.success && envelope.data.storageVersion !== STORAGE_VERSION) {
         throw new StorageError(
           `Workspace ${workspace} has storage version ${envelope.data.storageVersion}; this build reads version ${STORAGE_VERSION}. `
-          + `Upgrade Agentick, or move ${path} aside to start fresh.`,
+          + `Upgrade Magentic, or move ${path} aside to start fresh.`,
         );
       }
 
@@ -351,7 +338,7 @@ export function fileWorkspaceStore(directory: string): WorkspaceStore {
       // an optional property.
       const data = document.data as unknown as WorkspaceDocument;
       assertCoherent(data, workspace);
-      return { config: data.config, version: data.version, runs: data.runs, jiraActions: data.jiraActions ?? [], automationActions: data.automationActions ?? [] };
+      return { config: data.config, version: data.version, runs: data.runs, jiraActions: data.jiraActions ?? [] };
     },
 
     commit(workspace, state) {

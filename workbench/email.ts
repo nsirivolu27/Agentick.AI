@@ -120,7 +120,7 @@ export function memoryEmail(contacts: readonly EmailContact[] = []) {
         const text = `${event.actor} ${event.action} ${record.definition.title} in ${event.workspaceId}.\n\n`
           + (kind === "approval" ? `${count} of ${workflow.requiredApprovals} distinct approvals match this content. ${isServable(record, workflow) ? "It is eligible for the next MCP catalog load." : "It is not yet eligible to be served."}\n\n` : "")
           + (event.note ? `Review note: ${event.note}\n\n` : "")
-          + "Open the agent in Agentick to review the current definition. This message does not approve or publish an agent.\n\n"
+          + "Open the agent in Magentic to review the current definition. This message does not approve or publish an agent.\n\n"
           + `Content fingerprint: ${event.definitionHash}`;
         pending.push({
           id: randomUUID(), workspaceId: event.workspaceId, sender: event.actor, recipient: contact.email,

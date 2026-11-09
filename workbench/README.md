@@ -1,6 +1,6 @@
-# Agentick desktop developer space
+# Magentic desktop developer space
 
-Agentick is distributed as a downloaded, installed desktop application.
+Magentic is distributed as a downloaded, installed desktop application.
 Users launch it from their desktop or Start menu. Its backend, interface,
 workspace data, bot execution, and MCP integrations run on their computer.
 The browser demo below is a development tool, not the product delivery model.
@@ -219,7 +219,7 @@ Run `corepack pnpm build:desktop` under Windows with Node 22 after installing
 the existing dependencies, including the optional Ollama peer. The output
 `dist/desktop/Magentic-Developer-Windows.zip` contains the runtime, UI, bundled
 Ollama adapter, installer, and notices. Extract it and double-click `Install.cmd`; launch
-**Agentick Developer** from Start. The installer is per-user and refuses to
+**Magentic Developer** from Start. The installer is per-user and refuses to
 overwrite an existing directory. It never changes execution policy.
 
 This first desktop shell uses the installed Microsoft Edge engine in app mode,

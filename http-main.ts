@@ -41,7 +41,7 @@ const catalog: Catalog | undefined = source.catalog;
 const server = createAdapterHttpServer({ baseUrl, options, ...(catalog ? { catalog } : {}) });
 
 server.listen(port, host, () => {
-  console.log(`[http] Agentick on http://${host}:${port}/mcp, relaying to ${baseUrl}`);
+  console.log(`[http] Magentic on http://${host}:${port}/mcp, relaying to ${baseUrl}`);
   for (const entry of catalog?.entries ?? []) {
     const access = entry.writesAllowed ? "read+write" : "read";
     console.log(`[http]   ${entry.endpoint}  ${entry.definition.title} (${entry.activeTools.size} tools, ${access})`);

@@ -1,4 +1,4 @@
-# Reference material and what it means for Agentick
+# Reference material and what it means for Magentic
 
 Two short videos pointed at six tools. This folder keeps the parts of them that
 are worth reading (text only, with their licenses) and records how each one
@@ -15,7 +15,7 @@ existing engines, or a tool a person can run beside the workbench.
 | `third-party/task-observer/` | rebelytics/one-skill-to-rule-them-all | CC BY 4.0 | The observation log format and the signal catalogue for turning corrections into skill improvements. |
 | `third-party/headroom-llms.txt` | headroomlabs-ai/headroom | Apache 2.0 | Context compression and token accounting as a local proxy. Index only; the repo is large. |
 | `third-party/omniroute-llm.txt` | diegosouzapw/OmniRoute | MIT | One OpenAI compatible endpoint in front of many providers. Index only. |
-| `third-party/memory-search-reference.md` | thedotmack/claude-mem | Apache 2.0 | The three layer memory search pattern: index, timeline, details. |
+| `third-party/claude-mem-how-it-works.md` | thedotmack/claude-mem | Apache 2.0 | The three layer memory search pattern: index, timeline, details. |
 
 `claude-code-setup` is an editor plugin that inspects a repository and
 recommends hooks and configuration. Nothing to vendor; the idea is recorded
@@ -53,7 +53,7 @@ observation log is one file per observation with frontmatter
 catalogue says what is worth logging and what is not (the generalisability
 test).
 
-Where corrections already happen in Agentick:
+Where corrections already happen in Magentic:
 
 - a person edits a scheduler draft before completing the stage (the diff is
   the correction);
@@ -66,7 +66,7 @@ next to the import folder. A person marks an observation as "use it" before
 it is imported; nothing is trained from a correction nobody confirmed.
 
 One principle from the skill worth adopting as written: from a rule's second
-failure onward, propose a barrier, not better wording. Agentick already does
+failure onward, propose a barrier, not better wording. Magentic already does
 this with guards on bind and start; the learning cycle should do the same
 when an evaluation keeps failing on the same metric.
 
@@ -85,7 +85,7 @@ that bypasses the release rule.
 ### 4. headroom → Providers and token accounting (KAN-14)
 
 prompt-audit's Group 4 says token accounting comes first, because without it
-no cleanup can be measured. Agentick records none today. Ollama returns
+no cleanup can be measured. Magentic records none today. Ollama returns
 `prompt_eval_count` and `eval_count` on every reply; put them on the
 scheduler job, the learning run's train and evaluate steps, the chat turn
 and the editor attempt. The home page can then show tokens per assistant

@@ -1,6 +1,6 @@
 # Deployment and stack decision
 
-Agentick uses the Anthropic/OpenAI API track described in the supplied build
+Magentic uses the Anthropic/OpenAI API track described in the supplied build
 brief as its product direction. Keep the existing TypeScript, Node 22, zod and
 MCP SDK foundation. Model providers remain adapters; Ollama stays available for
 local work. A model selector does not establish that a provider is connected.
@@ -11,10 +11,10 @@ packaging step. No framework migration is needed to demonstrate this workflow.
 
 ```mermaid
 flowchart LR
-  Developer[Developer environment] --> Local[Local Agentick workspace]
+  Developer[Developer environment] --> Local[Local Magentic workspace]
   Local --> Bots[Isolated bot checkouts and validation]
   Clients[Compatible MCP clients on different platforms] --> TLS[HTTPS endpoint]
-  TLS --> Adapter[Stateless Agentick MCP adapter]
+  TLS --> Adapter[Stateless Magentic MCP adapter]
   Adapter --> Relay[Existing relay: identity, data and authorization]
   Local --> Models[Configured model adapters]
 ```
@@ -90,7 +90,7 @@ Run a real authenticated MCP request on two replicas before claiming scale-out.
 - Store versioned evidence and idempotency keys; keep approval hashes across
   handoffs. Never automatically retry an uncertain external write.
 - Keep Foundry or Databricks as optional integrations when a project's data
-  needs justify them. Agentick itself need not depend on either platform.
+  needs justify them. Magentic itself need not depend on either platform.
 - Treat web, mobile, data/AI and automation starters as editable task briefs.
   They do not install a stack, run bots, fetch datasets or grant new permissions.
 

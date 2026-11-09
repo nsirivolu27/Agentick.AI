@@ -159,7 +159,7 @@ class CodingView {
   }
   async fromEditor(mode, prompt) {
     await vscode.commands.executeCommand('magentic.workspace.focus');
-    if (!prompt) prompt = await vscode.window.showInputBox({ title: 'Agentick: propose a code change', prompt: 'Describe the result you want. Changes will be proposed for review.', ignoreFocusOut: true });
+    if (!prompt) prompt = await vscode.window.showInputBox({ title: 'Magentic: propose a code change', prompt: 'Describe the result you want. Changes will be proposed for review.', ignoreFocusOut: true });
     if (prompt) { try { await this.ask({ mode, prompt, includeContext: true }); } catch (error) { this.error(error); } }
   }
   async receive(message) {
@@ -244,7 +244,7 @@ class CodingView {
     const before = vscode.Uri.from({ scheme: 'magentic-proposal', path: `/${proposal.id}/${index}/before/${change.path}` });
     const after = vscode.Uri.from({ scheme: 'magentic-proposal', path: `/${proposal.id}/${index}/after/${change.path}` });
     this.diffContent.set(before.toString(), change.before ?? ''); this.diffContent.set(after.toString(), change.after);
-    await vscode.commands.executeCommand('vscode.diff', before, after, `${change.path} — Agentick proposal`, { preview: true });
+    await vscode.commands.executeCommand('vscode.diff', before, after, `${change.path} — Magentic proposal`, { preview: true });
     if (this.proposal === proposal) { this.reviewed.add(index); this.send(); }
   }
   async apply(id) {
