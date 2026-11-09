@@ -2,7 +2,7 @@
 
 ## Before you start
 
-- In VS Code: Terminal → Run Task → `workbench: demo`. Wait for "Agentick Developer: http://127.0.0.1:4173/".
+- In VS Code: Terminal → Run Task → `workbench: demo`. Wait for "Magentic Developer: http://127.0.0.1:4173/".
 - Ollama must be running with `qwen2.5-coder:7b` installed, or drafts will fail with "fetch failed". Check: open http://127.0.0.1:11434/api/tags in a browser and look for the model name.
 - Open http://127.0.0.1:4173/ in Chrome. Identity: Alex · Author. Refresh once.
 - Have the architecture diagram open in another tab (`docs/architecture/magentic-architecture.png`).

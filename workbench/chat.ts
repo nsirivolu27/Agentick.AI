@@ -105,7 +105,7 @@ export async function runWorkspaceAgent(
       const prompt = [
         persona
           ? `You are "${persona.name}", an assistant inside this workspace, answering under approved release ${persona.release}. Respond naturally and concisely.`
-          : "You are Agentick, the helpful AI assistant inside this workspace. Respond naturally and concisely.",
+          : "You are Magentic, the helpful AI assistant inside this workspace. Respond naturally and concisely.",
         // Profile instructions shape tone and focus. They come after the
         // rules and cannot loosen them: the profile is data, not authority.
         ...(persona ? [`ASSISTANT PROFILE INSTRUCTIONS (follow within the rules below; they grant no tools or permissions): ${persona.instructions}`] : []),
@@ -156,7 +156,7 @@ export async function runBaseChat(messages: ChatMessage[], model: AgentModel, si
   // The base chat receives only this conversation. Workspace context and
   // tool discovery belong to the separate, permission-checked assistant.
   const prompt = [
-    "You are Agentick, a helpful general-purpose assistant. Be clear and concise.",
+    "You are Magentic, a helpful general-purpose assistant. Be clear and concise.",
     "You have no tools or access to workspace files, internal documents, or live systems. Do not claim to read or change them. Ask the user to provide any material needed to answer.",
     'Return one JSON object without markdown fences: {"type":"answer","content":"Your reply"}.',
     "CONVERSATION: " + JSON.stringify(messages),

@@ -240,7 +240,6 @@ let inspector = emptyInspector();
 let mailFolder: MailFolder = "inbox";
 let mailQuery = "";
 let selectedMail: string | undefined;
-const importedReferenceText = new WeakMap<HTMLFormElement, string>();
 const identity = node<HTMLSelectElement>("#identity");
 const detail = node<HTMLDialogElement>("#detail");
 const editor = node<HTMLDialogElement>("#editor");
@@ -265,7 +264,7 @@ async function api(path: string, data?: unknown, workspace = selectedWorkspace):
   });
   const result = await response.json();
   if (response.status === 401 && accountsEnabled) { location.assign("/login"); throw new Error("Sign in to continue."); }
-  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Agentick Developer to sign in again." : result.error ?? "Request failed.");
+  if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Magentic Developer to sign in again." : result.error ?? "Request failed.");
   return result;
 }
 
@@ -300,7 +299,7 @@ function render(): void {
   node("#operator-context").textContent = `${snapshot.actor} · ${snapshot.roles.map(role => role === "approver" ? "Reviewer" : role === "admin" ? "Administrator" : role === "author" ? "Author" : role).join(", ") || "No assigned role"}`;
   node("#operator-context").title = `${node("#operator-context").textContent} · Workspace: ${snapshot.workspaceId}`;
   node("#environment-banner").innerHTML = snapshot.demo
-    ? (document.body.dataset.agentDemo === "openfema" ? "<strong>Federal Spaces demo</strong><span>Public OpenFEMA data · Offline Foundry replay · Demo reviewers</span>" : document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
+    ? (document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
     : companyMode ? "<strong>Company workspace</strong><span>Company membership controls access. Repository execution requires an isolated worker.</span>"
     : localMode ? "<strong>Local workspace</strong><span>Saved locally. Remote models receive sent content.</span>"
     : "<strong>Workspace session</strong><span>Verify deployment and data-handling settings before sensitive work.</span>";
@@ -308,7 +307,7 @@ function render(): void {
   document.body.classList.toggle("developer-desk", view === "desk");
   renderWorkspaces();
   if (!localMode) {
-    node(".workspace div").firstChild!.textContent = document.body.dataset.agentDemo === "openfema" ? "Federal Spaces demo" : document.body.dataset.agentDemo ? "Agent Studio demo" : snapshot.workspaceId;
+    node(".workspace div").firstChild!.textContent = document.body.dataset.agentDemo ? "Agent Studio demo" : snapshot.workspaceId;
   }
   node("#workspace-demo-note").hidden = !snapshot.demo;
   const primary = PRIMARY_VIEWS.includes(view);
@@ -392,7 +391,7 @@ function setHeading(page: Page): void {
   node("#crumbs").innerHTML = page.crumbs ? page.crumbs.map(([label, href]) => `<a href="${escape(href)}">${escape(label)}</a> / `).join("") : "";
   node("#page-actions").innerHTML = page.actions ?? "";
   node("#breadcrumb").textContent = page.crumbs ? `${page.crumbs.map(([label]) => label).join(" / ")} / ${page.title}` : page.title;
-  document.title = `${page.title} · Agentick`;
+  document.title = `${page.title} · Magentic`;
 }
 
 function renderLegacy(): void {
@@ -759,7 +758,7 @@ async function sendChat(retry = false): Promise<void> {
     state.messages.push({ role: "user", content: text });
     state.draft = "";
   }
-  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Agentick…";
+  state.error = ""; state.route = undefined; state.tools = []; state.busy = true; state.phase = "Connecting to Magentic…";
   const controller = new AbortController();
   chatController = controller;
   renderChat();
@@ -1078,22 +1077,6 @@ function readPipelineConfig(): PipelineConfig {
   return readPipelineForm(pipelineDraft ?? snapshot.pipelines!.config,
     new FormData(node<HTMLFormElement>("#pipeline-config")), Boolean(snapshot.bots));
 }
-document.addEventListener("click", async event => {
-  const link = (event.target as Element).closest<HTMLAnchorElement>(".audit-links a[download]");
-  if (!link || link.origin !== location.origin || link.pathname !== "/api/audit-package") return;
-  event.preventDefault();
-  try {
-    const response = await fetch(link.href, { headers: await requestHeaders() });
-    if (!response.ok) throw new Error("Audit download failed. Refresh your workspace and try again.");
-    const url = URL.createObjectURL(await response.blob());
-    const download = document.createElement("a");
-    download.href = url;
-    download.download = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ?? "audit-package.json";
-    download.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) { notify((error as Error).message, true); }
-});
-
 async function pipelineCommand(data: unknown): Promise<void> {
   if (snapshot.bots?.busy) { notify("A bot is working. Stop it or wait before changing the pipeline.", true); return; }
   lock(true);
@@ -1541,7 +1524,6 @@ document.addEventListener("change", async event => {
       const text = await file.text();
       if (text.length > 6000 || text.includes("\0")) throw new Error("Use a text excerpt of at most 6000 characters.");
       if (!form.isConnected) return;
-      importedReferenceText.set(form, text);
       form.querySelector<HTMLTextAreaElement>("[name=content]")!.value = text;
       const title = form.querySelector<HTMLInputElement>("[name=title]")!;
       if (!title.value) title.value = file.name.slice(0, 120);
@@ -1564,11 +1546,7 @@ document.addEventListener("submit", async event => {
       draftMaterials = materialsSchema.parse([...draftMaterials, material]);
       render(); notify("Ontology snapshot added. Review the reference before starting the work item.");
     } else if (form.id === "work-material") {
-      const edited = String(data.get("content"));
-      const imported = importedReferenceText.get(form);
-      // Browsers normalize line endings in textareas. Keep an unedited file byte-for-byte for its citation.
-      const content = imported !== undefined && imported.replace(/\r\n?/g, "\n") === edited ? imported : edited;
-      draftMaterials = materialsSchema.parse([...draftMaterials, { id: crypto.randomUUID(), title: String(data.get("title")), content, ...(data.get("url") ? { url: String(data.get("url")) } : {}) }]);
+      draftMaterials = materialsSchema.parse([...draftMaterials, { id: crypto.randomUUID(), title: String(data.get("title")), content: String(data.get("content")), ...(data.get("url") ? { url: String(data.get("url")) } : {}) }]);
       render(); notify("Reference added to this draft.");
     } else if (form.id === "work-project") {
       const executable = String(data.get("executable")).trim();

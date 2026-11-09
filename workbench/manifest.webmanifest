@@ -1,1 +1,1 @@
-{"id": "/", "name": "Agentick Developer", "short_name": "Agentick", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#101010", "theme_color": "#101010", "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]}
+{"id": "/", "name": "Magentic Developer", "short_name": "Magentic", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#101114", "theme_color": "#141519", "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]}

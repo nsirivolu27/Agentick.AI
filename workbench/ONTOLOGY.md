@@ -1,6 +1,6 @@
 # Foundry Ontology integration
 
-Run Agentick from the repository while the API and agent loop matures. Application packaging is a later milestone. Node 22 and the pinned pnpm are sufficient; this adapter adds no dependency.
+Run Magentic from the repository while the API and agent loop matures. Application packaging is a later milestone. Node 22 and the pinned pnpm are sufficient; this adapter adds no dependency.
 
 ## Try the complete local path
 
@@ -67,7 +67,7 @@ Create a local configuration outside the repository or in an ignored directory:
 
 Replace the example object, property and link API names with those in your Ontology Manager. Set `MAGENTIC_ONTOLOGY_FILE` to its absolute path and inject `MAGENTIC_FOUNDRY_TOKEN` through your local environment or secret manager. Never put the token in configuration, prompts, source files or screenshots. Missing credentials or invalid configuration fail startup. No configured file means no Ontology tools or form.
 
-The token's Foundry permissions are the upstream authority. Agentick's object/property/link allowlist further narrows what this connection returns. Everyone authorized to use that Agentick workspace can read its selected data under this connection identity. Use a narrowly scoped development identity; this release does not implement per-user OAuth or token refresh. Palantir recommends OAuth2 for production applications: [authentication documentation](https://www.palantir.com/docs/foundry/api/general/overview/authentication).
+The token's Foundry permissions are the upstream authority. Magentic's object/property/link allowlist further narrows what this connection returns. Everyone authorized to use that Magentic workspace can read its selected data under this connection identity. Use a narrowly scoped development identity; this release does not implement per-user OAuth or token refresh. Palantir recommends OAuth2 for production applications: [authentication documentation](https://www.palantir.com/docs/foundry/api/general/overview/authentication).
 
 ## Connect from VS Code or another MCP client
 
@@ -79,7 +79,7 @@ After building, `corepack pnpm ontology:mcp` starts the standalone stdio server.
     "magentic-ontology": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:/path/to/Agentick.AI/dist/workbench/ontology-main.mjs"],
+      "args": ["C:/path/to/Magentic.AI/dist/workbench/ontology-main.mjs"],
       "env": {
         "MAGENTIC_ONTOLOGY_FILE": "C:/private/magentic-ontology.json",
         "MAGENTIC_WORKSPACE": "workspace"
@@ -89,11 +89,11 @@ After building, `corepack pnpm ontology:mcp` starts the standalone stdio server.
 }
 ```
 
-This is a separate MCP connection usable by a developer's MCP client. The Agentick VS Code coding sidebar does not yet call Ontology directly. Workflow integration is through workspace chat and explicit reference snapshots. No new agent framework or ECC dependency is required; existing requirements, planning, implementation, validation, review and delivery agents consume the reference material.
+This is a separate MCP connection usable by a developer's MCP client. The Magentic VS Code coding sidebar does not yet call Ontology directly. Workflow integration is through workspace chat and explicit reference snapshots. No new agent framework or ECC dependency is required; existing requirements, planning, implementation, validation, review and delivery agents consume the reference material.
 
 ## Data flow and verification boundary
 
-Public source → Foundry ingestion/transforms → Ontology objects and links → bounded read-only API adapter → reviewed reference snapshot → Agentick phase agents → reviewed code and checks.
+Public source → Foundry ingestion/transforms → Ontology objects and links → bounded read-only API adapter → reviewed reference snapshot → Magentic phase agents → reviewed code and checks.
 
 Foundry owns ingestion and semantic modeling; this adapter consumes existing Ontology data. It does not upload datasets, modify Foundry records or execute Ontology Actions. API routes follow Palantir's [List Objects](https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontology-objects/list-objects) and [List Linked Objects](https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/linked-objects/list-linked-objects) contracts. Each read has a ten-second deadline and 128 KB response limit. Paging is explicit. Foundry may return more objects than the requested page size; responses above 50 objects are rejected, never silently dropped.
 

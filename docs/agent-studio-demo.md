@@ -1,14 +1,6 @@
 # Agent Studio demo
 
-### Virginia declaration briefing
-
-Run `corepack pnpm build:workbench` and `corepack pnpm demo:openfema`. Open the printed work item, choose **Prepare analyst brief**, compare the five areas with the source, and submit for review. Under **Account → Acting as**, select Reviewer 1, approve, then repeat as Reviewer 2. Download the JSON audit package and check it with `corepack pnpm audit:verify <file>`.
-
-The counts and citations come from the saved OpenFEMA response. This isolated, in-memory workspace replays the Foundry reads and uses demo identities. Preparing the brief performs no model inference. Restarting opens a fresh work item. Connecting to live Foundry requires a separate environment and mapping.
-
-### Documentation workflow
-
-From the Agentick checkout:
+From the Magentic checkout:
 
 ```sh
 corepack pnpm build:workbench

@@ -4,9 +4,9 @@
   --bg: #f5f6fa; --surface: #ffffff; --raised: #eef0f6; --input: #ffffff;
   --line: #dadde7; --line-strong: #b6bccd; --border-strong: #81869a;
   --text: #202334; --text-2: #4c5268; --text-3: #5e657b;
-  --brand-primary: #17613e; --brand-hover: #124c31; --brand-link: #17613e; --brand-soft: #e8f6ed;
-  --brand-border: #86b599; --brand-selection: #cbead7;
-  --brand-mark: #17613e; --brand-mark-soft: #e8f6ed; --on-primary: #fff;
+  --brand-hover: #5140bb; --brand-link: #5140bb; --brand-soft: #eeeafa;
+  --brand-border: #bfb4ec; --brand-selection: #dad4f4;
+  --brand-pink: #963674; --brand-pink-soft: #faeaf4;
   --ok: #17613e; --ok-soft: #e7f4eb; --ok-line: #90bf9f;
   --warn: #7c5708; --warn-soft: #fff5d9; --warn-line: #d4b568;
   --bad: #9d253d; --bad-soft: #fff0f2; --bad-line: #d9a0ad;
@@ -15,24 +15,24 @@
   --nav-text-2: var(--text-2); --nav-text-3: var(--text-3); --nav-accent: var(--brand-link); --nav-active: var(--brand-soft);
 }
 /*
- * Agentick uses neutral surfaces so dense workspace content stays readable.
- * Green identifies actions and selections; warnings and errors keep their
- * own colours so the brand never obscures a failed or blocked operation.
- * Informed by USWDS
+ * Magentic visual system: a dark, high contrast workspace in the manner of
+ * modern developer tools. Near black surfaces, white text, violet for the
+ * action and the selection, the pink diamond for the brand. State colours
+ * keep their meaning and every text pair clears 4.5:1. Informed by USWDS
  * principles for hierarchy, explicit states and visible focus; this is not
  * a government theme or a compliance claim. Loaded after the legacy sheets.
  */
 :root {
   color-scheme: dark;
-  --brand-primary: #1ed760; --brand-hover: #3be477; --brand-link: #72e69c;
-  --brand-soft: #11291b; --brand-border: #2b6841; --brand-selection: #19492c;
-  --brand-mark: #1ed760; --brand-mark-soft: #11291b;
-  --nav-bg: #0a0a0a; --nav-surface: #121212; --nav-raised: #202020; --nav-line: #2b2b2b;
-  --nav-border: #414141; --nav-text: #f3f5f3; --nav-text-2: #b8bdb9; --nav-text-3: #a0a8a2;
-  --nav-accent: #72e69c; --nav-active: #11291b;
-  --bg: #101010; --surface: #181818; --raised: #242424; --input: #111111;
-  --line: #303030; --line-strong: #404040; --border-strong: #555b57;
-  --text: #f3f5f3; --text-2: #b8bdb9; --text-3: #a0a8a2;
+  --brand-primary: #6457e0; --brand-hover: #7c6cf0; --brand-link: #b3a7ff;
+  --brand-soft: #1b1933; --brand-border: #3b3577; --brand-selection: #2b2660;
+  --brand-pink: #e07ac4; --brand-pink-soft: #2a1a26;
+  --nav-bg: #0b0b0f; --nav-surface: #121218; --nav-raised: #1a1a23; --nav-line: #22222c;
+  --nav-border: #3a3a48; --nav-text: #ededf2; --nav-text-2: #b0b0bf; --nav-text-3: #8a8a9a;
+  --nav-accent: #b3a7ff; --nav-active: #1b1933;
+  --bg: #0b0b0f; --surface: #121218; --raised: #1a1a23; --input: #0e0e13;
+  --line: #22222c; --line-strong: #2e2e3a; --border-strong: #42424f;
+  --text: #ededf2; --text-2: #b0b0bf; --text-3: #8a8a9a;
   --accent: var(--brand-link); --accent-strong: var(--brand-primary); --accent-soft: var(--brand-soft);
   --ok: #6fd3a0; --ok-soft: #10261b; --ok-line: #1f5a3d; --warn: #e9c46a; --warn-soft: #2a230e; --warn-line: #6b5518;
   --bad: #f58a98; --bad-soft: #2d1218; --bad-line: #7a2a38; --info: var(--brand-link); --info-soft: var(--brand-soft);
@@ -60,8 +60,8 @@ a, button, summary, input, select, textarea { -webkit-tap-highlight-color: trans
 }
 .brand-row { display: flex; align-items: center; justify-content: space-between; }
 .brand { gap: 11px; padding: 0 8px 23px; font-size: 21px; letter-spacing: -.04em; font-weight: 750; }
-.brand .mark { width: 34px; height: 34px; background: var(--brand-mark-soft); color: var(--brand-mark); border: 1px solid var(--brand-border); border-radius: 8px; font-size: 24px; transform: none; }
-.brand-dot { color: var(--brand-mark); }
+.brand .mark { width: 34px; height: 34px; background: var(--brand-pink-soft); color: var(--brand-pink); border: 1px solid #5a3350; border-radius: 8px; font-size: 24px; transform: none; }
+.brand-dot { color: var(--brand-pink); }
 .brand small { display: block; font: 9px/1.6 var(--font); font-weight: 650; letter-spacing: .13em; color: var(--nav-text-3); }
 .workspace { padding: 12px; margin-bottom: 13px; border-color: var(--nav-line); background: var(--nav-surface); font-size: 13px; min-height: 58px; }
 .workspace-icon { width: 29px; height: 29px; background: var(--nav-raised); color: var(--nav-accent); border-radius: 4px; }
@@ -101,7 +101,7 @@ nav.nav-list { display: flex; flex-direction: column; gap: 2px; overflow: visibl
 .heading .crumbs:empty { display: none; }
 .page-actions { flex-wrap: wrap; }
 footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 35px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 10px; color: var(--text-3); }
-.primary { color: var(--on-primary, #07120b); background: var(--brand-primary); border-color: var(--brand-primary); font-weight: 650; box-shadow: 0 1px 0 #ffffff1f inset; }
+.primary { color: #fff; background: var(--brand-primary); border-color: var(--brand-primary); font-weight: 650; box-shadow: 0 1px 0 #ffffff1f inset; }
 .primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
 .secondary, .btn { background: var(--raised); border-color: var(--border-strong); color: var(--text); }
 .secondary:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--brand-soft); border-color: var(--brand-border); color: var(--text); }
@@ -200,7 +200,7 @@ footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10
 .queue-empty > span { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-link); font-size: 18px; margin-bottom: 12px; }
 .queue-empty h3 { font-size: 15px; }
 .queue-empty p { color: var(--text-3); font-size: 12px; margin: 7px 0 16px; }
-.queue-fresh > span { color: var(--brand-mark); background: var(--brand-mark-soft); border-color: var(--brand-border); }
+.queue-fresh > span { color: var(--brand-pink); background: var(--brand-pink-soft); border-color: #5a3350; }
 .queue-first-steps { list-style: none; margin: 0 auto; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 760px; text-align: left; counter-reset: step; }
 .queue-first-steps li { counter-increment: step; display: grid; gap: 4px; padding: 12px 14px 12px 44px; position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised); }
 .queue-first-steps li::before { content: counter(step); position: absolute; left: 12px; top: 12px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--brand-soft); color: var(--brand-link); border: 1px solid var(--brand-border); }
@@ -284,7 +284,7 @@ a, button, .nav, .btn, .primary, .secondary, .quiet, .node a, .flow-row, .work-i
 .heading h1 { font-size: 26px; letter-spacing: -.035em; }
 .heading .lede { color: var(--text-3); }
 input:not([type=checkbox]):not([type=radio]), select, textarea { background: var(--input); border-color: var(--border-strong); }
-input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--brand-primary); box-shadow: 0 0 0 3px var(--brand-soft); outline: none; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--brand-primary); box-shadow: 0 0 0 3px #6457e040; outline: none; }
 .label, .section-kicker, .eyebrow, .node-label, .review-block h4, .table th, .queue-table th { color: var(--text-3); }
 .environment-banner { background: var(--surface); }
 footer { color: var(--text-3); }
@@ -801,7 +801,7 @@ body.navigation-open { overflow: hidden; }
 main { width: 100%; min-width: 0; }
 .console-topbar { position: sticky; top: 0; height: auto; min-height: 64px; display: flex; gap: 16px; padding: 10px 24px; background: var(--surface); }
 .console-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 19px; font-weight: 750; white-space: nowrap; text-decoration: none; }
-.console-diamond { color: var(--brand-mark); font-size: 32px; line-height: 1; }
+.console-diamond { color: var(--brand-pink); font-size: 32px; line-height: 1; }
 .console-topbar .services-toggle { display: inline-flex; flex: none; }
 .console-topbar .workspace { display: flex; align-items: center; gap: 8px; margin: 0; min-height: 36px; max-width: 240px; padding: 4px 10px; text-align: left; background: var(--raised); border-color: var(--line-strong); color: var(--text); }
 .console-topbar .workspace div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

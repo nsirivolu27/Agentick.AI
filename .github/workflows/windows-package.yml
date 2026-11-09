@@ -1,6 +1,6 @@
 name: Windows package
 
-# Builds the Agentick Developer Windows package on a tag such as v0.2.0, or on
+# Builds the Magentic Developer Windows package on a tag such as v0.2.0, or on
 # demand for a dry run. The package is attached to the release for a tag and
 # kept as a workflow artifact otherwise. Nothing here signs the package.
 on:

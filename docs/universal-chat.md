@@ -181,7 +181,7 @@ A downgrade is rechecked before inference and refuses stale model access or caps
 
 ## Account linking and company access
 
-Clerk signs a person into Agentick. Matching email addresses alone do not link
+Clerk signs a person into Magentic. Matching email addresses alone do not link
 provider accounts or authorize a company model server. Current membership remains
 an explicit workspace-to-user mapping. Provider OAuth and organization SSO are
 not activated by the personal API forms, and are not yet implemented here.
@@ -198,4 +198,4 @@ consent. The relevant integration references are:
 - https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
 - https://clerk.com/docs/guides/organizations/add-members/verified-domains
 
-These references describe provider capabilities, not completed Agentick connections.
+These references describe provider capabilities, not completed Magentic connections.

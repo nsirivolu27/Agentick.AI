@@ -31,7 +31,7 @@ const steps = [
     backend: "The workflow engine advances the stage after its completion and approval conditions are satisfied. UI navigation cannot bypass those conditions.",
     notes: "Show the locked state before signing, then return after the simulated reviews. Handoff here is not deployment to a cloud environment." },
   { name: "Audit", title: "Leave a record the company can inspect.", state: "Audit summary",
-    description: "Keep the output and review history in Agentick. Company messaging is a separate, human-controlled action.",
+    description: "Keep the output and review history in Magentic. Company messaging is a separate, human-controlled action.",
     artifact: '<div class="artifact-label">Illustrative audit summary / DOC-001</div><p>Request → source → draft → independent review → handoff.</p><p><b>Slack:</b> an administrator previews a company audit summary or team update before sending. Delivery receipts distinguish accepted from unconfirmed delivery.</p><p class="small">No Slack message is sent here. Slack cannot approve or execute work.</p>',
     backend: "Audit and delivery records remain workspace scoped. The Slack endpoint checks company-session authority and persists a receipt before a network request.",
     notes: "Finish with accountability: what was used, what was produced, who reviewed it and what happened next. Separate audit evidence from a claim of regulatory compliance." },
@@ -82,7 +82,7 @@ byId("demo").addEventListener("click", event => {
   else if (button.id === "demo-reset") { revision = 1; signatures.clear(); navigate(0); }
 });
 // Pin evidence to the version demonstrated here so later branch changes cannot break it.
-const source = "https://github.com/nsirivolu27/Agentick.AI/blob/55f1da2aa1d62aec25531dff3a9e5782d0eaf597/";
+const source = "https://github.com/nsirivolu27/Magentic.AI/blob/55f1da2aa1d62aec25531dff3a9e5782d0eaf597/";
 const layers = {
   frontend: { title: "A workspace UI over typed state", stack: "HTML · CSS tokens · TypeScript · React 19",
     detail: "Hash-based navigation opens workspace views, evidence and review controls. Most pages render HTML from a typed snapshot; React powers the interactive work queue. esbuild bundles the browser.",
@@ -145,7 +145,7 @@ const securityStages = {
     title: "The company can investigate and recover.",
     built: "Workflow history records the handoff. Company Slack messages require an administrator preview and retain delivery receipts; Slack is not an approval channel.",
     aws: "Combine application events with CloudTrail, CloudWatch, GuardDuty and Security Hub CSPM. Protect log retention, test AWS Backup restores and rehearse incident response; use Session Manager for restricted host access.",
-    example: "A delivered Slack message does not prove approval. CloudTrail records AWS activity, not every action inside Agentick.",
+    example: "A delivered Slack message does not prove approval. CloudTrail records AWS activity, not every action inside Magentic.",
     proof: "Trigger an alert, revoke a credential and restore a workspace. Check its references, approvals and audit history after recovery.",
   },
 };
@@ -167,7 +167,7 @@ function renderSecurity(key) {
   const columns = document.createElement("div");
   columns.className = "security-columns";
   panel.append(columns);
-  for (const [label, detail] of [["Built into Agentick", stage.built], ["AWS design · not deployed", stage.aws]]) {
+  for (const [label, detail] of [["Built into Magentic", stage.built], ["AWS design · not deployed", stage.aws]]) {
     const column = document.createElement("div");
     columns.append(column);
     text(column, "h4", label, "artifact-label");

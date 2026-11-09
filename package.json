@@ -1,7 +1,7 @@
 {
   "name": "magentic-mcp",
   "version": "0.2.0",
-  "description": "Agentick: the Model Context Protocol server for the LNKZ conversation relay.",
+  "description": "Magentic: the Model Context Protocol server for the LNKZ conversation relay.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.26.1",
@@ -20,8 +20,6 @@
     "test:ui": "playwright test --config tests/operations-ui.config.mjs",
     "dev:workbench": "node ./workbench/dev.mjs",
     "demo:workbench": "node ./dist/workbench/demo.mjs",
-    "demo:openfema": "node ./dist/workbench/agent-demo.mjs --openfema",
-    "audit:verify": "node ./dist/workbench/audit-verify-main.mjs",
     "demo:agents": "node ./dist/workbench/agent-demo.mjs",
     "seed:state": "tsc -p tsconfig.test.json && node .testbuild/workspaces/seed-state.js",
     "build:desktop": "node ./workbench/desktop/build.mjs",

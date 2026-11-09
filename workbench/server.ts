@@ -39,13 +39,7 @@ import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import { DocumentError, type DocumentsEngine } from "./documents.js";
 import { StudioStorageError } from "./studio/store.js";
 
-import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit } from "./audit-package.js";
-import { randomUUID } from "node:crypto";
-import { declarationBrief, verifiedDeclarationSample } from "./declaration-sample.js";
-import { isDeclarationMaterial } from "./materials.js";
-
 export interface WorkspaceIdentity {
-  recentSignIn?: boolean;
   workspaceId: string; actor: string;
   // A standalone MCP credential must not inherit local delivery authority.
   canDeliverJira?: boolean;
@@ -239,25 +233,6 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       if (path === "/api/agent-tests" && request.method === "GET" && options.agentTests) {
         send(response, 200, options.agentTests.snapshot(workspaceId)); return;
       }
-      if (path === "/api/audit-package" && request.method === "GET" && options.pipelines) {
-        // One run's chain of custody as a file. Any member may read it; it only contains what the run page already shows.
-        const query = new URL(request.url!, "http://localhost").searchParams;
-        const markdown = query.get("format") === "markdown";
-        const deliver = (name: string, text: string) => {
-          response.writeHead(200, { "Content-Type": markdown ? "text/markdown; charset=utf-8" : "application/json; charset=utf-8",
-            "Content-Disposition": `attachment; filename="${name}.${markdown ? "md" : "json"}"` });
-          response.end(text);
-        };
-        if (query.get("scope") === "workspace") {
-          // The whole workspace: every run's package plus the definition audit log, under one bundle hash.
-          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor });
-          deliver(`workspace-audit-${workspaceId}`, markdown ? renderWorkspaceAudit(bundle) : JSON.stringify(bundle, null, 2)); return;
-        }
-        const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === query.get("run"));
-        if (!run) throw new RequestError(404, "Run not found in this workspace.");
-        const pkg = buildAuditPackage(run, { workspaceId, actor });
-        deliver(`audit-package-${run.id}`, markdown ? renderAuditPackage(pkg) : JSON.stringify(pkg, null, 2)); return;
-      }
       if ((path === "/api/chat/models" || path === "/api/agent-studio/models") && request.method === "GET") {
         // Personal chat connections do not grant credentials to workflow agents.
         if (path === "/api/chat/models" && options.chatAccess) {
@@ -406,38 +381,14 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         if (!options.pipelines) throw new RequestError(404, "Pipelines are not configured.");
         await pending;
         const approvals = (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals;
-        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence, options.ontology?.(workspaceId), identity.recentSignIn === false ? "Sign in again before approving this handoff." : undefined);
+        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence);
         else {
-          if ((raw as { action?: unknown })?.action === "prepare_declaration_brief") {
-            const input = z.object({ action: z.literal("prepare_declaration_brief"), runId: z.string().uuid(),
-              expectedRevision: z.number().int().positive() }).strict().parse(raw);
-            const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === input.runId);
-            if (!run) throw new RequestError(404, "Work item not found.");
-            if (!roles.includes("admin") && !(roles.includes("author") && run.owner === actor)) throw new PermissionError("Only the owner or an admin can prepare a draft.");
-            const stage = run.config.stages[run.current]!;
-            const progress = run.stages[run.current]!;
-            if (run.status !== "running" || progress.status !== "active" || progress.draft
-              || !stage.approval || stage.assistantId || (stage.bot && stage.bot.kind !== "manual")) {
-              throw new RequestError(409, "Choose an active, unstaffed review gate without an existing draft.");
-            }
-            const material = run.materials?.find(isDeclarationMaterial);
-            const reader = options.ontology?.(workspaceId);
-            if (!run.workflowSource || !material || reader?.catalog().mode !== "foundry") throw new RequestError(409, "Start a work item with a Foundry-verified declaration sample.");
-            if (run.revision !== input.expectedRevision) throw new RequestError(409, "Work item changed. Refresh and try again.");
-            const sample = await verifiedDeclarationSample(material, reader);
-            // The revision check at write time also protects against changes during the remote reads.
-            send(response, 200, options.pipelines.draft(workspaceId, { runId: run.id, stageId: stage.id,
-              expectedRevision: input.expectedRevision, by: "Public data analyst (source tool)", jobId: randomUUID(), text: declarationBrief(sample) }));
-            return;
-          }
           // The studio shows "test before assigning"; the server holds the same line.
           if (options.agentTests && isConfigure(raw)) {
             const untested = newlyAssigned(options.pipelines.snapshot(workspaceId).config, raw.config).filter(agent => !passedCurrentTest(agent, options.agentTests!.snapshot(workspaceId)));
             if (untested.length) throw new RequestError(409, `Run a passing test on the current version of ${untested.map(agent => agent.name).join(", ")} before assigning it to a stage.`);
           }
-          if (identity.recentSignIn === false && (raw as { action?: unknown })?.action === "approve") throw new PermissionError("Sign in again before approving this handoff.");
-          const start = (raw as { action?: unknown })?.action === "start" && options.pipelines.start;
-          send(response, 200, start ? await start(workspaceId, actor, roles, raw, approvals) : options.pipelines.execute(workspaceId, actor, roles, raw, approvals));
+          send(response, 200, options.pipelines.execute(workspaceId, actor, roles, raw, approvals));
         }
         tickScheduler(workspaceId);
         return;

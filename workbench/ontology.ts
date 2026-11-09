@@ -17,7 +17,6 @@ const connection = z.discriminatedUnion("mode", [
   // An ingested dataset file (see ontology:ingest). The path is absolute or relative to the configuration file.
   z.object({ workspaceId: identifier, mode: z.literal("dataset"), file: z.string().min(1).max(500), objectTypes: z.array(objectPolicy).min(1).max(30).optional() }).strict(),
   z.object({ workspaceId: identifier, mode: z.literal("foundry"), ontology: identifier,
-    companyKey: primaryKey.optional(), workflowKey: primaryKey.optional(),
     baseUrl: z.string().url().refine(value => {
       const url = new URL(value);
       return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash && url.pathname === "/";
@@ -223,14 +222,12 @@ export function createOntologyDirectory(raw: unknown, readSetting: (name: string
 export function loadOntologyDirectory(readSetting: (name: string) => string | undefined = setting): OntologyDirectory {
   const path = readSetting("MAGENTIC_ONTOLOGY_FILE");
   if (!path) return () => undefined;
-  return createOntologyDirectory(readOntologyConfig(path), readSetting, fetch, dirname(resolve(path)));
-}
-
-export function readOntologyConfig(path: string): unknown {
+  let raw: unknown;
   try {
     if (statSync(path).size > 128_000) throw new Error();
-    return JSON.parse(readFileSync(path, "utf8"));
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch { throw new Error("MAGENTIC_ONTOLOGY_FILE: provide a readable JSON configuration under 128 KB."); }
+  return createOntologyDirectory(raw, readSetting, fetch, dirname(resolve(path)));
 }
 
 export function ontologyMaterial(object: OntologyObject): Material {
