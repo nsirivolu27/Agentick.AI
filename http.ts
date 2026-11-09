@@ -281,7 +281,7 @@ function escapeHtml(value: string): string {
  * adopts. One static string, no script, no network: someone handed a URL can
  * see what is here and copy the endpoint they want into their client.
  *
- * The colour, type and depth values are Agentick's, inlined rather than
+ * The colour, type and depth values are Magentic's, inlined rather than
  * linked so this page has no runtime file dependency. brand/tokens.css is
  * the source of truth and is right when the two diverge.
  *
@@ -319,25 +319,25 @@ function indexPage(agents: readonly CatalogEntry[]): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agentick</title>
+<title>Magentic</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#101010; --surface-1:#181818; --surface-2:#242424;
-  --line:#303030; --line-strong:#404040;
-  --text:#f3f5f3; --text-2:#b8bdb9; --text-3:#a0a8a2;
-  --accent:#1ed760; --on-accent:#07120b; --live:#34E0B0;
+  --bg:#0A0610; --surface-1:#130D1C; --surface-2:#1B1327;
+  --line:#2C2140; --line-strong:#3E2F58;
+  --text:#F2EDF8; --text-2:#B0A4C4; --text-3:#8B7DA3;
+  --accent:#E84BA3; --on-accent:#12060E; --live:#34E0B0;
   --sans:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg:#f6f8f6; --surface-1:#FFFFFF; --surface-2:#eef3ef;
-    --line:#d7ded8; --line-strong:#bec9c0;
-    --text:#132017; --text-2:#405847; --text-3:#55685c;
-    --accent:#17613e; --on-accent:#FFFFFF; --live:#0C8F70;
+    --bg:#FAF7FD; --surface-1:#FFFFFF; --surface-2:#F3EEFA;
+    --line:#E4DCF0; --line-strong:#CFC2E4;
+    --text:#140D1F; --text-2:#4E4361; --text-3:#6B5F80;
+    --accent:#B22273; --on-accent:#FFFFFF; --live:#0C8F70;
   }
 }
 * { box-sizing: border-box; }
@@ -381,7 +381,7 @@ a { color:var(--accent); }
 </style></head>
 <body>
 <div class="wrap">
-<p class="mark"><i aria-hidden="true">◆</i> <b>Agentick</b></p>
+<p class="mark"><b>magentic</b><i>.ai</i></p>
 <h1>Agents</h1>
 <p class="lede">Each one is a fixed set of tools over one conversation relay. Point an MCP client at an endpoint below and send your own relay key as <code>Authorization: Bearer &lt;key&gt;</code>.</p>
 <div class="counts">

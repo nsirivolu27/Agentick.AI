@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
-import { isDeclarationMaterial, materialsSchema, type Material } from "./materials.js";
-import { agentConfigurableSchema, configurableStages } from "./agent-configurables.js";
+import { materialsSchema, type Material } from "./materials.js";
+import { agentConfigurableSchema } from "./agent-configurables.js";
 import { botPolicySchema } from "./bot-schema.js";
 import type { Role } from "../registry/roles.js";
 
@@ -39,7 +39,6 @@ export const DEFAULT_PIPELINE: PipelineConfig = DEVELOPMENT_WORKFLOW;
 export const pipelineCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("configure"), expectedVersion: z.number().int().min(1), config: pipelineSchema }).strict(),
   z.object({ action: z.literal("start"), requestId: z.string().uuid(), title: z.string().trim().min(3).max(160), brief: text,
-    expectedVersion: z.number().int().min(1).optional(), configurableId: z.string().uuid().optional(),
     materials: materialsSchema.optional(), issueKey: z.string().regex(/^[A-Z][A-Z0-9]{1,19}-[1-9][0-9]*$/).optional() }).strict(),
   z.object({ action: z.enum(["complete", "approve", "pause", "resume", "block", "retry", "cancel"]),
     runId: z.string().uuid(), expectedRevision: z.number().int().min(1), note: text.optional() }).strict(),
@@ -58,7 +57,7 @@ export interface PipelineRun {
   id: string; requestId: string; workspaceId: string; owner: string; title: string; brief: string; issueKey: string | null;
   config: PipelineConfig; version: number; revision: number; requiredApprovals: number; createdAt: string; updatedAt: string;
   status: "running" | "paused" | "blocked" | "complete" | "cancelled"; current: number; stages: StageRun[];
-  events: PipelineEvent[]; jira: JiraPreview[]; materials?: Material[]; workflowSource?: Material;
+  events: PipelineEvent[]; jira: JiraPreview[]; materials?: Material[];
 }
 /** Where this workspace's state lives. "file" means it survives a restart. */
 export type StorageMode = "memory" | "file";
@@ -75,8 +74,7 @@ export interface PipelineGuards { assistant?(workspace: string, assistantId: str
 export interface DraftInput { runId: string; stageId: string; expectedRevision: number; text: string; by: string; jobId: string }
 export interface PipelineEngine {
   snapshot(workspace: string): PipelineSnapshot;
-  start?(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number): Promise<PipelineSnapshot>;
-  execute(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number, workflowSource?: Material): PipelineSnapshot;
+  execute(workspace: string, actor: string, roles: readonly Role[], raw: unknown, requiredApprovals: number): PipelineSnapshot;
   /** Attach an assistant's draft to the active stage of a running workflow. The stage stays active; only a person completes it. */
   draft(workspace: string, input: DraftInput): PipelineSnapshot;
 }
@@ -164,8 +162,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       if (run.revision !== input.expectedRevision) throw new PipelineError(409, "This run changed. Refresh before acting.");
       const index = run.config.stages.findIndex(stage => stage.id === input.stageId);
       if (run.status !== "running" || index !== run.current || run.stages[index]!.status !== "active") throw new PipelineError(409, "That stage is no longer active.");
-      const text = input.text.trim();
-      if (text.length > 4000) throw new PipelineError(400, "A draft must not exceed 4000 characters; it was not saved.");
+      const text = input.text.trim().slice(0, 4000);
       if (!text) throw new PipelineError(400, "A draft needs text.");
       run.stages[index]!.draft = { text, hash: createHash("sha256").update(text).digest("hex"), by: input.by, jobId: input.jobId, at: new Date().toISOString() };
       event(run, input.by, "draft_ready", `Draft prepared by ${input.by}. A person completes the stage with it or writes their own output.`);
@@ -173,7 +170,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       if (persistence) { persistence.commit(workspace, { ...persistence.read(workspace), ...value }); workspaces.set(workspace, value); }
       return snapshot(workspace);
     },
-    execute(workspace, actor, roles, raw, requiredApprovals, workflowSource) {
+    execute(workspace, actor, roles, raw, requiredApprovals) {
       if (!roles.length) throw new PipelineError(403, "Workspace membership is required.");
       const input = pipelineCommandSchema.parse(raw);
       // A working copy. Every mutation below lands here, and the live state
@@ -205,21 +202,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
             || JSON.stringify(existing.materials ?? []) !== JSON.stringify(input.materials ?? [])) {
             throw new PipelineError(409, "This request ID was already used for different work.");
           }
-          if (input.expectedVersion !== undefined && existing.version !== input.expectedVersion) {
-            throw new PipelineError(409, "This request ID belongs to another workflow version.");
-          }
-          if (input.configurableId) {
-            const agent = existing.config.configurables?.find(item => item.id === input.configurableId);
-            if (!agent || !configurableStages(existing.config, agent).length) throw new PipelineError(409, "This run does not use the saved agent.");
-          }
           return publish();
-        }
-        if (input.materials?.some(isDeclarationMaterial) && !workflowSource) throw new PipelineError(409, "OpenFEMA declaration runs require verified Foundry evidence.");
-        if (input.expectedVersion !== undefined && input.expectedVersion !== value.version) throw new PipelineError(409, "Workflow changed. Refresh before starting.");
-        if (input.configurableId) {
-          if (input.expectedVersion === undefined) throw new PipelineError(400, "Agent runs require a workflow version.");
-          const agent = value.config.configurables?.find(item => item.id === input.configurableId);
-          if (!agent || !configurableStages(value.config, agent).length) throw new PipelineError(409, "Assign the saved agent to a stage before starting.");
         }
         if (value.runs.length >= 100) throw new PipelineError(409, "This in-memory workspace holds at most 100 runs.");
         if (!Number.isInteger(requiredApprovals) || requiredApprovals < 1 || requiredApprovals > 10) throw new PipelineError(400, "Invalid approval policy.");
@@ -229,7 +212,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
         checkAssistants(workspace, value.config);
         const at = new Date().toISOString();
         const run: PipelineRun = { id: randomUUID(), requestId: input.requestId, workspaceId: workspace, owner: actor,
-          title: input.title, brief: input.brief, ...(workflowSource ? { workflowSource: structuredClone(workflowSource) } : {}), ...(input.materials ? { materials: structuredClone(input.materials) } : {}), issueKey: input.issueKey ?? null, config: structuredClone(value.config),
+          title: input.title, brief: input.brief, ...(input.materials ? { materials: structuredClone(input.materials) } : {}), issueKey: input.issueKey ?? null, config: structuredClone(value.config),
           version: value.version, revision: 1, requiredApprovals, createdAt: at, updatedAt: at, status: "running", current: 0,
           stages: value.config.stages.map((_, index) => ({ status: index ? "pending" : "active", output: "", outputHash: "", outputBy: "", approvals: [] })), events: [], jira: [] };
         const item = event(run, actor, "started", input.brief); jira(run, item, run.config.stages[0]!.jiraStatus);
@@ -252,12 +235,7 @@ function createEngine(persistence: PipelinePersistence | undefined, guards: Pipe
       } else {
         if (!admin && (actor !== run.owner || !roles.includes("author"))) throw new PipelineError(403, "The run owner or an admin must perform this action.");
         if (input.action === "materials") {
-          // Every reviewer must see the same sources while signatures are being collected.
-          if (stage.status === "awaiting_review") throw new PipelineError(409, "The source material is under review. Finish this review or start a new run with the corrected evidence.");
-          const priorSample = (run.materials ?? []).filter(isDeclarationMaterial);
-          if (JSON.stringify(priorSample) !== JSON.stringify(input.materials.filter(isDeclarationMaterial))) {
-            throw new PipelineError(409, "Start a new run to verify a different declaration sample against Foundry.");
-          }
+          // Closed runs were refused above; any open run may change its reference material.
           run.materials = structuredClone(input.materials);
           event(run, actor, "materials", input.materials.length ? `Reference material: ${input.materials.map((item) => item.title).join(", ")}.` : "Reference material cleared.");
         } else if (input.action === "complete") {

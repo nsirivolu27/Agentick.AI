@@ -112,10 +112,6 @@ for (const [path, file, type] of [
   ["/app.js", "app.js", "text/javascript; charset=utf-8"],
   ["/styles.css", "styles.css", "text/css; charset=utf-8"],
   ["/agency.css", "agency.css", "text/css; charset=utf-8"],
-  ["/SourceSansPro-Regular.woff2", "SourceSansPro-Regular.woff2", "font/woff2"],
-  ["/SourceSansPro-Semibold.woff2", "SourceSansPro-Semibold.woff2", "font/woff2"],
-  ["/SourceSansPro-Bold.woff2", "SourceSansPro-Bold.woff2", "font/woff2"],
-  ["/SourceSansPro-LICENSE.txt", "SourceSansPro-LICENSE.txt", "text/plain; charset=utf-8"],
   ["/pipeline.css", "pipeline.css", "text/css; charset=utf-8"],
   ["/chat.css", "chat.css", "text/css; charset=utf-8"],
   ["/theme.css", "theme.css", "text/css; charset=utf-8"],
@@ -167,7 +163,7 @@ server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("The local server has no TCP address.");
   const url = `http://127.0.0.1:${address.port}/`;
-  console.log(`Agentick Developer: ${url} (sample data only)`);
+  console.log(`Magentic Developer: ${url} (sample data only)`);
   if (desktop) process.send!({ url });
 });
 if (desktop) process.once("disconnect", () => {
