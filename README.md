@@ -1,35 +1,88 @@
-# Agentick | Federal Spaces demo
+# lnkz-mcp
 
-An analyst on one team prepares a disaster briefing. Before another team uses it, they want to know **which records support the finding, what those records cover, and who approved the wording**. Federal Spaces keeps the brief, its sources, and the review decisions together in one work item.
+Standalone MCP adapter for the LLMM/LNKZ REST relay.
 
-**The Virginia example.** The saved OpenFEMA response contains five county records for declaration **3631**. Goochland, Caroline, Montgomery, York, and Bedford each have a row. All five rows carry the same declaration number. The brief can say those counties appear in this sample. Establishing the full extent of the disaster would require checking the full declaration and current designations.
+This repository intentionally contains no LLMM console, database, stores,
+connectors, or product branding. It owns only the MCP surface and a small
+authenticated REST client. The relay remains the source of truth.
 
-[View the presentation](https://agentick-presentation.vercel.app) · [Inspect the five source records](examples/ontology/openfema/data/virginia-snapshot.json)
+## Configure
 
-![Virginia briefing during review. One reviewer has signed the submitted wording. A second approval is required before handoff.](docs/images/virginia-work-item.svg)
+The adapter fails at startup unless both variables are present:
 
-## Walk through the handoff
-
-1. **Prepare the brief.** As **Operator**, open the work item and select **Prepare analyst brief**. Compare the county names and declaration number with the attached snapshot, then select **Submit for review**.
-2. **Review the wording.** Under **Account → Acting as**, choose **Reviewer 1** and select **Approve this handoff**. The work item stays pending at **1 of 2**. Switch to **Reviewer 2**, check that the wording stays within the sample, and approve to complete the handoff.
-3. **Check what the receiving team gets.** Download **Approval → Audit package → JSON**. The file contains the source references, original draft, submitted wording, and both reviewers’ decisions. The verification command below checks that the text matches the recorded hashes.
-
-## Run it locally
-
-With Node 22 and Corepack:
-
-```powershell
-git clone https://github.com/nsirivolu27/Agentick.AI.git
-cd Agentick.AI
-corepack pnpm install --frozen-lockfile
-corepack pnpm build:workbench
-corepack pnpm demo:openfema
+```bash
+export LNKZ_BASE_URL=http://localhost:3100
+export LNKZ_API_KEY=your-relay-key
+npm ci
+npm run build
+npm start
 ```
 
-Open the **work-item URL** printed in the terminal. You can play all three roles without an account or API key. The demo uses a real OpenFEMA snapshot, a rule-based analyst, and an offline replay of Foundry reads.
+Claude Desktop / other stdio clients:
 
-After downloading the audit package, open another terminal in the repository and substitute the path to your file:
-
-```powershell
-corepack pnpm audit:verify "C:\path\to\downloaded-audit.json"
+```json
+{
+  "mcpServers": {
+    "lnkz": {
+      "command": "node",
+      "args": ["/absolute/path/lnkz-mcp/dist/stdio.js"],
+      "env": {
+        "LNKZ_BASE_URL": "https://llmm.example.com",
+        "LNKZ_API_KEY": "replace-with-a-secret"
+      }
+    }
+  }
+}
 ```
+
+The API key is sent only as an `Authorization: Bearer` header to
+`LNKZ_BASE_URL`. Never commit it or print it in logs.
+
+## Stable MCP contract
+
+The adapter preserves all existing names:
+
+- **Tools:** `save_conversation`, `import_conversation`, `get_conversation`,
+  `list_conversations`, `search_conversations`, `append_messages`,
+  `delete_conversation`, `create_handoff`, `redeem_handoff`,
+  `continue_handoff`, `revoke_handoff`, `list_handoffs`,
+  `build_context_packet`, `analyze_conversation`, `find_conflicts`,
+  `find_duplicates`, `search_context`, `list_connectors`, `workspace_stats`,
+  `audit_log`, `build_context_graph`, `export_conversation`,
+  `list_publish_targets`, and `prepare_publish`.
+- **Resources:** `lnkz://connectors`, `lnkz://stats`,
+  `lnkz://conversations`, `lnkz://graph`, and
+  `lnkz://conversation/{id}`.
+- **Prompts:** `continue_shared_conversation`, `research_brief`,
+  `prepare_handoff`, and `reconcile_conflicts`.
+
+All data operations go through the relay REST API. The adapter does not
+silently fall back to local storage or invent a response when the relay
+returns an error.
+
+## Context forwarding
+
+For trusted downstream MCP targets, a context envelope may be signed with
+`LNKZ_MCP_CONTEXT_SECRET`. It contains a workspace ID, actor ID, scopes,
+short expiry, and trace ID. Plain workspace headers are never trusted. API-key
+and managed-auth identity take precedence over forwarded context, and
+production authentication must fail closed.
+
+```bash
+LNKZ_MCP_CONTEXT_SECRET=...
+LNKZ_CONTEXT_WORKSPACE_ID=...
+LNKZ_CONTEXT_ACTOR_ID=...
+LNKZ_CONTEXT_SCOPES=conversations:read,conversations:write
+LNKZ_CONTEXT_TRACE_ID=...
+```
+
+## Development
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+Tests use a stub REST client, so they never need a database, a relay process,
+credentials, or network access.
