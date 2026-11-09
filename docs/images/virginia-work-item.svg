@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="354" viewBox="0 0 720 354" role="img" aria-labelledby="title desc">
+  <title id="title">Virginia declaration briefing at independent review</title>
+  <desc id="desc">Five Virginia area records in one OpenFEMA declaration. The operator has submitted the brief. Reviewer 1 has signed, and Reviewer 2 must sign before handoff.</desc>
+  <style>
+    text { font-family: "Segoe UI", Arial, sans-serif; fill: #f3f5f3 }
+    .label { font: 600 13px Consolas, monospace; letter-spacing: 1.4px; fill: #b8bdb9 }
+    .small { font-size: 16px; fill: #c9cfca }
+    .stage { font-size: 17px; font-weight: 600 }
+    .green { fill: #6fd3a0 }
+    .amber { fill: #e9c46a }
+    .panel { fill: #181818; stroke: #373937 }
+    .rule { stroke: #373937 }
+  </style>
+  <rect x=".5" y=".5" width="719" height="353" rx="7" fill="#101010" stroke="#373937"/>
+  <path d="m24 27 8-8 8 8-8 8z" fill="#1ed760"/>
+  <text x="50" y="32" class="label">AGENTICK / WORK ITEMS</text>
+  <text x="694" y="32" text-anchor="end" class="label amber">FEDERAL SPACES</text>
+  <path d="M0 51h720" class="rule"/>
+  <text x="26" y="93" font-size="30" font-weight="600">Virginia declaration briefing</text>
+  <text x="26" y="120" class="small">OpenFEMA · Declaration 3631 · Winter storm</text>
+
+  <g transform="translate(26 143)">
+    <rect width="159" height="39" rx="3" class="panel"/>
+    <path d="m14 20 4 4 8-10" fill="none" stroke="#6fd3a0" stroke-width="2"/>
+    <text x="38" y="26" class="stage">Intake</text>
+    <rect x="170" width="159" height="39" rx="3" class="panel"/>
+    <path d="m184 20 4 4 8-10" fill="none" stroke="#6fd3a0" stroke-width="2"/>
+    <text x="208" y="26" class="stage">Grounding</text>
+    <rect x="340" width="159" height="39" rx="3" fill="#17251c" stroke="#1ed760"/>
+    <circle cx="360" cy="20" r="5" fill="#1ed760"/>
+    <text x="378" y="26" class="stage">Review</text>
+    <rect x="510" width="158" height="39" rx="3" class="panel"/>
+    <circle cx="530" cy="20" r="5" fill="none" stroke="#a0a8a2" stroke-width="1.5"/>
+    <text x="548" y="26" class="stage">Handoff</text>
+  </g>
+
+  <g transform="translate(26 200)">
+    <rect width="329" height="129" rx="3" class="panel"/>
+    <text x="17" y="26" class="label">EVIDENCE</text>
+    <path d="M17 39h295" class="rule"/>
+    <text x="17" y="66" class="stage">5 area records · 1 declaration</text>
+    <text x="17" y="91" class="small">Goochland, Caroline, Montgomery,</text>
+    <text x="17" y="113" class="small">York and Bedford counties</text>
+  </g>
+  <g transform="translate(366 200)">
+    <rect width="328" height="129" rx="3" class="panel"/>
+    <text x="17" y="26" class="label">APPROVAL</text>
+    <text x="311" y="26" text-anchor="end" class="label amber">1 OF 2</text>
+    <path d="M17 39h294" class="rule"/>
+    <text x="17" y="68" class="stage">Reviewer 1</text>
+    <text x="311" y="68" text-anchor="end" class="small green">Signed</text>
+    <text x="17" y="104" class="stage">Reviewer 2</text>
+    <text x="311" y="104" text-anchor="end" class="small amber">Waiting</text>
+  </g>
+</svg>

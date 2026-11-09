@@ -1,0 +1,194 @@
+/*
+ * Agentick design tokens
+ *
+ * Dark is the base and light is a real second theme, not an afterthought.
+ * Both are declared here so a surface never has to invent a value.
+ *
+ * Three rules this file cannot enforce but the system depends on:
+ *   1. Green is reserved. It marks the one primary action, the focus ring,
+ *      and nothing else. A panel is never green and a heading is never
+ *      green.
+ *   2. Depth is a lighter surface plus a hairline. Shadow appears only when
+ *      something genuinely left the page, which means an overlay.
+ *   3. Hierarchy comes from scale and weight. Uppercase is rare enough that
+ *      it means something when it appears.
+ */
+
+:root {
+  /* Signal green, the house colour. 400 on dark, 600 on light. */
+  --mg-50:  #ebf9f0;
+  --mg-100: #cdf4dc;
+  --mg-200: #98edb6;
+  --mg-300: #3be477;
+  --mg-400: #1ed760;
+  --mg-500: #18ab4c;
+  --mg-600: #17613e;
+  --mg-700: #124c31;
+  --mg-800: #113a27;
+  --mg-900: #10291c;
+
+  /* Type */
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* The jumps matter more than the values. 72 to 40 to 24 is nearly a
+     halving each time, which is what lets one element on a screen lead. */
+  --text-display: 72px;
+  --text-title:   40px;
+  --text-heading: 24px;
+  --text-body:    17px;
+  --text-small:   14px;
+  --text-micro:   12px;
+
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semi:    600;
+
+  --track-display: -0.04em;
+  --track-title:   -0.03em;
+  --track-heading: -0.015em;
+
+  /* Space, in fours */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Corners stay small. A large radius reads as a toy. */
+  --radius-chip:  4px;
+  --radius-field: 6px;
+  --radius-panel: 8px;
+  --radius-pill:  999px;
+
+  /* Motion. Nothing bounces, nothing travels more than 4px. */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-hover: 120ms;
+  --dur-enter: 180ms;
+
+  /* Minimum target for anything tappable. */
+  --target: 44px;
+}
+
+/* ---------------------------------------------------------------- dark, the base */
+
+:root,
+:root[data-theme="dark"] {
+  --bg:         #101010;
+  --surface-1:  #181818;
+  --surface-2:  #242424;
+  --surface-3:  #303030;
+
+  --line:        #303030;
+  --line-strong: #404040;
+
+  --text:   #f3f5f3;
+  --text-2: #b8bdb9;
+  --text-3: #a0a8a2;
+
+  --accent:      var(--mg-400);
+  --accent-hover: var(--mg-300);
+  --accent-press: var(--mg-500);
+  --accent-weak: rgba(30, 215, 96, 0.12);
+  /* Dark ink keeps button labels readable on bright green. */
+  --on-accent:   #07120b;
+  --focus-ring:  rgba(30, 215, 96, 0.22);
+
+  --lineage: #A87BFF;
+  --live:    #34E0B0;
+  --caution: #F5B544;
+  --stop:    #FF5C47;
+
+  /* Overlay only. Nothing else casts a shadow. */
+  --shadow-overlay: 0 18px 48px rgba(3, 1, 6, 0.7);
+}
+
+/* ---------------------------------------------------------------- light, supported */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:         #FAF7FD;
+    --surface-1:  #FFFFFF;
+    --surface-2:  #F3EEFA;
+    --surface-3:  #EAE2F5;
+
+    --line:        #E4DCF0;
+    --line-strong: #CFC2E4;
+
+    --text:   #140D1F;
+    --text-2: #4E4361;
+    --text-3: #6B5F80;
+
+    --accent:      var(--mg-600);
+    --accent-hover: var(--mg-700);
+    --accent-press: var(--mg-800);
+    --accent-weak: rgba(23, 97, 62, 0.08);
+    --on-accent:   #FFFFFF;
+    --focus-ring:  rgba(23, 97, 62, 0.2);
+
+    --lineage: #6D34D6;
+    --live:    #0C8F70;
+    --caution: #8A5A08;
+    --stop:    #C23A28;
+
+    --shadow-overlay: 0 18px 40px rgba(20, 13, 31, 0.14);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg:         #FAF7FD;
+  --surface-1:  #FFFFFF;
+  --surface-2:  #F3EEFA;
+  --surface-3:  #EAE2F5;
+
+  --line:        #E4DCF0;
+  --line-strong: #CFC2E4;
+
+  --text:   #140D1F;
+  --text-2: #4E4361;
+  --text-3: #6B5F80;
+
+  --accent:      var(--mg-600);
+  --accent-hover: var(--mg-700);
+  --accent-press: var(--mg-800);
+  --accent-weak: rgba(23, 97, 62, 0.08);
+  --on-accent:   #FFFFFF;
+  --focus-ring:  rgba(23, 97, 62, 0.2);
+
+  --lineage: #6D34D6;
+  --live:    #0C8F70;
+  --caution: #8A5A08;
+  --stop:    #C23A28;
+
+  --shadow-overlay: 0 18px 40px rgba(20, 13, 31, 0.14);
+}
+
+/* ---------------------------------------------------------------- base */
+
+body {
+  /* Always explicit, so a theme flip never leaves a white gap. */
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers a person will compare against other numbers. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Machine output: an id, a tool name, an endpoint, a count. Never prose. */
+.mono { font-family: var(--font-mono); }
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
