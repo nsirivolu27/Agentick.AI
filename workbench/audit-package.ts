@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { PipelineRun } from "./pipeline.js";
 import type { AuditEvent } from "../registry/audit.js";
+import { approvalRecordSchema, outputRevisionSchema, sourceHistorySchema, reviewSourceHash } from "./review-evidence.js";
 
 /**
  * The audit package: one run's chain of custody as a document an auditor can
@@ -30,7 +31,18 @@ export const auditStageSchema = z.object({
   approvals: z.array(z.string()),
   completedAt: z.string().optional(),
   draft: z.object({ text: z.string(), hash: z.string(), by: z.string(), at: z.string() }).strict().optional(),
+  outputVersion: z.number().int().min(1).optional(), sourceHash: z.string().regex(hashPattern).optional(),
+  approvalRecords: z.array(approvalRecordSchema).optional(), revisions: z.array(outputRevisionSchema).optional(),
+  /** Who the handoff was proposed to, and the discussion that stayed with the stage. Present only when used. */
+  proposal: z.object({ by: z.string(), at: z.string(), reviewers: z.array(z.string()), outputHash: z.string() }).strict().optional(),
+  comments: z.array(z.object({ id: z.string(), by: z.string(), at: z.string(), text: z.string(), outputHash: z.string() }).strict()).optional(),
 }).strict();
+const activitySchema = z.object({
+  executionId: z.string(), runId: z.string(), kind: z.enum(["worker", "analyst"]), status: z.string(),
+  model: z.string().optional(), events: z.array(z.object({ at: z.string(), message: z.string() }).strict()),
+  note: z.string(),
+}).strict();
+export type AuditActivity = z.infer<typeof activitySchema>;
 
 export const auditPackageSchema = z.object({
   kind: z.literal("magentic-audit-package"),
@@ -47,6 +59,8 @@ export const auditPackageSchema = z.object({
   stages: z.array(auditStageSchema),
   events: z.array(z.object({ at: z.string(), actor: z.string(), stage: z.string(), action: z.string(), detail: z.string() }).strict()),
   materials: z.array(z.object({ title: z.string(), url: z.string().optional(), content: z.string(), contentHash: z.string() }).strict()),
+  sourceHistory: sourceHistorySchema.optional(),
+  toolActivity: z.array(activitySchema).optional(),
   packageHash: z.string(),
 }).strict();
 export type AuditPackage = z.infer<typeof auditPackageSchema>;
@@ -65,7 +79,7 @@ function bodyHash(pkg: Omit<AuditPackage, "packageHash">): string {
   return sha256(canonical(pkg));
 }
 
-export function buildAuditPackage(run: PipelineRun, options: { workspaceId: string; actor: string; now?: Date; handling?: string }): AuditPackage {
+export function buildAuditPackage(run: PipelineRun, options: { workspaceId: string; actor: string; now?: Date; handling?: string; activity?: AuditActivity[] }): AuditPackage {
   const body: Omit<AuditPackage, "packageHash"> = {
     kind: "magentic-audit-package", version: 1,
     generatedAt: (options.now ?? new Date()).toISOString(), generatedBy: options.actor, workspaceId: options.workspaceId,
@@ -77,9 +91,15 @@ export function buildAuditPackage(run: PipelineRun, options: { workspaceId: stri
       status: stage.status, output: stage.output, outputHash: stage.outputHash, outputBy: stage.outputBy, approvals: [...stage.approvals],
       ...(stage.completedAt ? { completedAt: stage.completedAt } : {}),
       ...(stage.draft ? { draft: { text: stage.draft.text, hash: stage.draft.hash, by: stage.draft.by, at: stage.draft.at } } : {}),
+      ...(stage.outputVersion ? { outputVersion: stage.outputVersion, sourceHash: stage.sourceHash,
+        approvalRecords: structuredClone(stage.approvalRecords ?? []), revisions: structuredClone(stage.revisions ?? []) } : {}),
+      ...(stage.proposal ? { proposal: structuredClone(stage.proposal) } : {}),
+      ...(stage.comments?.length ? { comments: structuredClone(stage.comments) } : {}),
     })),
     events: run.events.map(event => ({ at: event.at, actor: event.actor, stage: event.stage, action: event.action, detail: event.detail })),
     materials: [...(run.workflowSource ? [run.workflowSource] : []), ...(run.materials ?? [])].map(material => ({ title: material.title, ...(material.url ? { url: material.url } : {}), content: material.content, contentHash: sha256(material.content) })),
+    ...(run.sourceHistory ? { sourceHistory: structuredClone(run.sourceHistory) } : {}),
+    ...(options.activity ? { toolActivity: structuredClone(options.activity) } : {}),
   };
   return { ...body, packageHash: bodyHash(body) };
 }
@@ -101,6 +121,32 @@ export function verifyAuditPackage(raw: unknown): Verification {
     const where = `Stage ${stage.index + 1} (${stage.name})`;
     if (stage.output && sha256(stage.output) !== stage.outputHash) problems.push(`${where}: the output text does not match its recorded hash.`);
     if (stage.draft && sha256(stage.draft.text) !== stage.draft.hash) problems.push(`${where}: the draft text does not match its recorded hash.`);
+    if (stage.sourceHash && !pkg.sourceHistory?.[stage.sourceHash]) problems.push(`${where}: frozen source evidence is missing.`);
+    if (stage.outputVersion) {
+      for (const actor of stage.approvals) {
+        const records = (stage.approvalRecords ?? []).filter(record => record.actor === actor &&
+          record.version === stage.outputVersion && record.outputHash === stage.outputHash && record.sourceHash === stage.sourceHash);
+        if (records.length !== 1) problems.push(`${where}: approval by ${actor} is not bound to the current output and sources.`);
+      }
+      if ((stage.approvalRecords ?? []).some(record => !stage.approvals.includes(record.actor))) problems.push(`${where}: an approval record has no current approver.`);
+    }
+    for (const revision of stage.revisions ?? []) {
+      if (sha256(revision.before) !== revision.beforeHash || sha256(revision.after) !== revision.afterHash) problems.push(`${where}: revision ${revision.version} text does not match its hashes.`);
+      if (!pkg.sourceHistory?.[revision.sourceHash]) problems.push(`${where}: revision ${revision.version} source evidence is missing.`);
+      for (const approval of revision.priorApprovals) {
+        if (approval.outputHash !== revision.beforeHash || !pkg.sourceHistory?.[approval.sourceHash] ||
+          !revision.priorApprovers.includes(approval.actor) || approval.version >= revision.version) {
+          problems.push(`${where}: revision ${revision.version} has an inconsistent historical approval.`);
+        }
+      }
+    }
+    const revisions = stage.revisions ?? [];
+    revisions.forEach((revision, index) => {
+      const prior = revisions[index - 1];
+      if (prior && (revision.version !== prior.version + 1 || revision.beforeHash !== prior.afterHash)) problems.push(`${where}: the revision chain is inconsistent.`);
+    });
+    const last = revisions.at(-1);
+    if (last && (last.version !== stage.outputVersion || last.afterHash !== stage.outputHash || last.sourceHash !== stage.sourceHash)) problems.push(`${where}: the current output does not match its final revision.`);
     if (new Set(stage.approvals).size !== stage.approvals.length) problems.push(`${where}: repeated reviewer.`);
     for (const signer of stage.approvals) {
       if (!pkg.events.some(event => event.action === "approved" && event.actor === signer && event.detail === `Approved output ${stage.outputHash}.`)) {
@@ -110,11 +156,20 @@ export function verifyAuditPackage(raw: unknown): Verification {
       if (signer === stage.outputBy) problems.push(`${where}: the output author ${signer} appears as a signer.`);
     }
     if (stage.status === "complete" && stage.gate && stage.approvals.length < pkg.run.requiredApprovals) problems.push(`${where}: completed with ${stage.approvals.length} of ${pkg.run.requiredApprovals} required approvals.`);
+    if (stage.status === "complete" && stage.proposal) {
+      const unsigned = stage.proposal.reviewers.filter(reviewer => !stage.approvals.includes(reviewer));
+      if (unsigned.length) problems.push(`${where}: completed without the named reviewer${unsigned.length === 1 ? "" : "s"} ${unsigned.join(", ")}.`);
+    }
     if (stage.approvals.length && !pkg.events.some(event => event.action === "approved" && event.detail.includes(stage.outputHash))) problems.push(`${where}: no approval event names the output hash.`);
   }
   pkg.materials.forEach((material, index) => {
     if (sha256(material.content) !== material.contentHash) problems.push(`Reference ${index + 1} (${material.title}): the content does not match its recorded hash.`);
   });
+  for (const [hash, sources] of Object.entries(pkg.sourceHistory ?? {})) {
+    if (reviewSourceHash(sources) !== hash) problems.push("A frozen source snapshot does not match its recorded hash.");
+    if (sources.some(source => "kind" in source && sha256(source.content) !== source.sha256)) problems.push("A frozen project file does not match its recorded content hash.");
+  }
+  if (pkg.toolActivity?.some(activity => activity.runId !== pkg.run.id)) problems.push("Execution evidence belongs to a different work item.");
   const signed = pkg.stages.filter(stage => stage.approvals.length).length;
   return { ok: problems.length === 0, problems, summary: `${pkg.run.title}: ${pkg.stages.length} stages, ${signed} signed, ${pkg.events.length} events, ${pkg.materials.length} references, run ${pkg.run.status}.` };
 }
@@ -138,10 +193,24 @@ export function renderAuditPackage(pkg: AuditPackage): string {
     if (stage.draft) out.push(`Draft by ${stage.draft.by} at ${stage.draft.at}, hash ${stage.draft.hash}.`);
     if (stage.output) {
       out.push(`Output by ${stage.outputBy}, hash ${stage.outputHash}.`);
+      if (stage.proposal) out.push(`Proposed to ${stage.proposal.reviewers.join(", ")} by ${stage.proposal.by} at ${stage.proposal.at}.`);
       out.push(`Signed by: ${stage.approvals.length ? stage.approvals.join(", ") : "nobody yet"}.`, "");
+      for (const comment of stage.comments ?? []) out.push(`Comment by ${comment.by} at ${comment.at}: ${comment.text}`);
       out.push("```", stage.output, "```");
     } else out.push("No output yet.");
+    if (stage.sourceHash) out.push(`Output revision ${stage.outputVersion}; frozen source hash ${stage.sourceHash}.`);
+    for (const revision of stage.revisions ?? []) {
+      out.push(`#### Revision ${revision.version}: ${revision.kind}`, `${revision.by} at ${revision.at}. ${revision.reason}`,
+        `Source hash ${revision.sourceHash}. Earlier approvals invalidated: ${revision.priorApprovers.join(", ") || "none"}.`,
+        "Before:", "```", revision.before, "```", "After:", "```", revision.after, "```");
+    }
     out.push("");
+  }
+  out.push("## Tool activity", "");
+  if (!pkg.toolActivity?.length) out.push("No execution trace was included in this package.", "");
+  for (const activity of pkg.toolActivity ?? []) {
+    out.push(`### ${activity.kind}: ${activity.executionId}`, `Status: ${activity.status}. ${activity.note}`,
+      ...activity.events.map(event => `${event.at}: ${event.message}`), "");
   }
   out.push("## Reference material", "");
   if (!pkg.materials.length) out.push("None attached.", "");
@@ -175,13 +244,13 @@ export const workspaceAuditSchema = z.object({
 }).strict();
 export type WorkspaceAudit = z.infer<typeof workspaceAuditSchema>;
 
-export function buildWorkspaceAudit(runs: readonly PipelineRun[], definitionEvents: readonly AuditEvent[], options: { workspaceId: string; actor: string; now?: Date; handling?: string }): WorkspaceAudit {
+export function buildWorkspaceAudit(runs: readonly PipelineRun[], definitionEvents: readonly AuditEvent[], options: { workspaceId: string; actor: string; now?: Date; handling?: string; activityForRun?: (run: PipelineRun) => AuditActivity[] }): WorkspaceAudit {
   const now = options.now ?? new Date();
   const body: Omit<WorkspaceAudit, "bundleHash"> = {
     kind: "magentic-workspace-audit", version: 1,
     generatedAt: now.toISOString(), generatedBy: options.actor, workspaceId: options.workspaceId,
     ...(options.handling ? { handling: options.handling } : {}),
-    runs: [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(run => buildAuditPackage(run, { ...options, now })),
+    runs: [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(run => buildAuditPackage(run, { ...options, now, ...(options.activityForRun ? { activity: options.activityForRun(run) } : {}) })),
     definitionEvents: definitionEvents.map(event => ({ agentName: event.agentName, action: event.action, actor: event.actor, at: event.at, definitionHash: event.definitionHash, ...(event.note ? { note: event.note } : {}) })),
   };
   return { ...body, bundleHash: sha256(canonical(body)) };

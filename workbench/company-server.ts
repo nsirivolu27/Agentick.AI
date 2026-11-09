@@ -2,6 +2,7 @@ import { loadZenfluenceDirectory } from "./zenfluence.js";
 import { createAutomationRuntime, loadAutomationUnits, type AutomationRuntime } from "./automation-runtime.js";
 import { lambdaInvoker } from "./automation-lambda.js";
 import { companyChatIdentity } from "./company-chat.js";
+import { chatTimeoutMs } from "./chat.js";
 import { createChatAccess, loadChatPlan } from "./chat-access.js";
 import { fileChatVault } from "./chat-vault.js";
 import { join } from "node:path";
@@ -46,7 +47,15 @@ export function companyDatasetFiles(directory: string) {
   return { ...files, importFile() { throw new StudioStorageError("Upload dataset text in company mode. Host file imports are unavailable."); } };
 }
 
+export function companyListenHost(value = setting("MAGENTIC_WORKBENCH_HOST")): string {
+  const host = value?.trim() || "127.0.0.1";
+  // Container networking needs an explicit opt-in; desktop installs stay private.
+  if (host !== "127.0.0.1" && host !== "0.0.0.0") throw new Error("MAGENTIC_WORKBENCH_HOST must be 127.0.0.1 or 0.0.0.0.");
+  return host;
+}
+
 export async function startCompanyWorkbench() {
+  const host = companyListenHost();
   const accounts = loadAccounts();
   if (!accounts?.companies) throw new Error("Configure companies in MAGENTIC_ACCOUNTS_FILE before starting the company server.");
   const origin = setting("MAGENTIC_PUBLIC_ORIGIN")?.trim();
@@ -80,7 +89,7 @@ export async function startCompanyWorkbench() {
     const chatAccess = createChatAccess({ base: chat, managedLogin: true, plan: loadChatPlan(),
       vault: fileChatVault(join(dataDir, "chat-connections"), setting("MAGENTIC_CONNECTIONS_KEY")), entitled: workspace => billing.tier(workspace) });
     const ontology = loadOntologyDirectory();
-    scheduler = createScheduler({ pipelines, assistants, loadModel: chatModelLoader(chat), persistence: fileSchedulePersistence(join(dataDir, "schedule")) });
+    scheduler = createScheduler({ pipelines, assistants, loadModel: chatModelLoader(chatAccess.agentConfiguration()), persistence: fileSchedulePersistence(join(dataDir, "schedule")) });
     const runningScheduler = scheduler;
     const documents = createDocuments({ store: fileDocumentStore(join(dataDir, "documents")), studio, pipelines, requiredApprovals: workflow.requiredApprovals });
     const publicAssets = assets();
@@ -93,8 +102,8 @@ export async function startCompanyWorkbench() {
         const identity = await companies.authenticate(request);
         return identity ? { ...identity, canRunAutomations: true } : undefined;
       }), guard, pipelines, studio, scheduler, documents, ontology, automations, zenfluence,
-      billing, chatAccess, chat });
-    await new Promise<void>((resolve, reject) => { server!.once("error", reject); server!.listen(port, "127.0.0.1", resolve); });
+      billing, chatAccess, chat, chatTimeoutMs: chatTimeoutMs(setting, 120) });
+    await new Promise<void>((resolve, reject) => { server!.once("error", reject); server!.listen(port, host, resolve); });
     ticker = setInterval(() => {
       for (const entry of directory.list().workspaces) if (entry.organizationId) void runningScheduler.tick(entry.id).catch(() => undefined);
     }, 30_000);

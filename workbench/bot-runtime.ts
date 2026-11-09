@@ -84,10 +84,12 @@ export function createBotRuntime(directory: string, pipelines: PipelineEngine, c
     const timer = setTimeout(() => controller.abort(), attempt.bot.timeoutSeconds * 1000);
     try {
       if (!chat) throw new Error("No model configured.");
-      const choices = await untilAborted(chat.modelOptions ? chat.modelOptions()
-        : (chat.listModels ? chat.listModels() : Promise.resolve([chat.model])).then(names => names.map(id => ({ id, available: true }))), controller.signal);
+      // The catalog is bound to this workspace, so a workspace connection resolves here and nowhere else.
+      const catalog = chat.forWorkspace ? await untilAborted(chat.forWorkspace(value.workspaceId), controller.signal) : chat;
+      const choices = await untilAborted(catalog.modelOptions ? catalog.modelOptions()
+        : (catalog.listModels ? catalog.listModels() : Promise.resolve([catalog.model])).then(names => names.map(id => ({ id, available: true }))), controller.signal);
       if (!choices.some(item => item.id === attempt.model && item.available)) throw new Error("Selected model unavailable.");
-      const model = await untilAborted(chat.loadModel(attempt.model, { maxOutputTokens: 1024 }), controller.signal);
+      const model = await untilAborted(catalog.loadModel(attempt.model, { maxOutputTokens: 1024 }), controller.signal);
       // Previous prose can claim success. Only checks recorded for this run
       // and the current tree are presented as command evidence to a model.
       const checked = value.attempts.filter(item => item.runId === run.id && item.checkout === attempt.checkout && item.checkedTree && item.checks.length);
@@ -95,7 +97,14 @@ export function createBotRuntime(directory: string, pipelines: PipelineEngine, c
       const evidence = checked.filter(item => item.checkedTree === tree).slice(-3)
         .map(item => ({ attemptId: item.id, stageId: item.stageId,
           checks: item.checks.map(check => ({ ...check, output: check.output.slice(0, 2000) })) }));
-      const result = await runBotWorker(attempt, run, model, controller.signal, message => event(value, attempt, message), evidence, previousAttempt);
+      attempt.sourceEvidence = [];
+      const result = await runBotWorker(attempt, run, model, controller.signal, message => event(value, attempt, message), evidence, previousAttempt, source => {
+        const sha256 = digest(source.content);
+        if (!attempt.sourceEvidence!.some(item => item.path === source.path && item.sha256 === sha256)) {
+          attempt.sourceEvidence!.push({ ...source, kind: "project-file", id: randomUUID(), executionId: attempt.id,
+            title: source.path.slice(0, 120), sha256, readAt: new Date().toISOString() });
+        }
+      });
       controller.signal.throwIfAborted();
       current(value.workspaceId, attempt.actor, ["admin"], run.id, attempt.revision);
       attempt.summary = result.summary; attempt.changes = result.changes;
@@ -234,6 +243,7 @@ export function createBotRuntime(directory: string, pipelines: PipelineEngine, c
               event(value, attempt, "Configured checks finished. Exit codes are recorded in the timeline.");
             } finally { checkControllers.delete(controller); }
           } else if (input.action === "accept") {
+            if (attempt.bot.requireSourceRead && !attempt.sourceEvidence?.length) throw new PipelineError(409, "This result has no frozen source reads. Run a new attempt before handing it off.");
             if (attempt.handoff?.blockers.length) throw new PipelineError(409, "Resolve the agent's blockers and run a new attempt before handing off.");
             if (attempt.changes.length && attempt.status !== "applied") throw new PipelineError(409, "Apply the reviewed changes before handing off this result.");
             if (attempt.changes.some(change => readProjectFile(attempt.checkout, change.path) !== change.after)) throw new PipelineError(409, "Applied files changed after review. Run the bot again.");
@@ -246,7 +256,7 @@ export function createBotRuntime(directory: string, pipelines: PipelineEngine, c
             const report = attempt.summary + (attempt.handoff ? "\n\n" + handoffText(attempt.handoff) : "");
             // Keep the evidence reference intact even for a long legacy summary.
             const note = report.slice(0, Math.max(0, 4000 - trace.length)) + trace;
-            pipelines.execute(workspace, actor, roles, { action: "complete", runId: run.id, expectedRevision: run.revision, note }, approvals);
+            pipelines.execute(workspace, actor, roles, { action: "complete", runId: run.id, expectedRevision: run.revision, note }, approvals, undefined, attempt.sourceEvidence);
             attempt.status = "accepted"; event(value, attempt, "Result submitted through the pipeline's existing approval gate.");
           }
         }

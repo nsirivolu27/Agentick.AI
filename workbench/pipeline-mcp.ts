@@ -18,14 +18,17 @@ import type { PipelineEngine } from "./pipeline.js";
 import type { AssistantDirectory } from "./assistant-resolver.js";
 import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import type { DocumentsEngine } from "./documents.js";
+import type { AgentTestsEngine } from "./agent-tests.js";
+import { registerEvaluationInspection } from "./evaluation-mcp.js";
 
 export async function handlePipelineMcp(engine: PipelineEngine, workspace: string, actor: string, roles: readonly Role[],
-  approvals: number, request: IncomingMessage, response: ServerResponse, raw: unknown, bots?: BotRuntime, jira?: Pick<JiraRuntime, "inspect">, assistants?: AssistantDirectory, learning?: LearningEngine, documents?: DocumentsEngine, automations?: AutomationRuntime, zenfluence?: ZenfluenceDirectory, ontology?: OntologyReader, approvalRefusal?: string): Promise<void> {
+  approvals: number, request: IncomingMessage, response: ServerResponse, raw: unknown, bots?: BotRuntime, jira?: Pick<JiraRuntime, "inspect">, assistants?: AssistantDirectory, learning?: LearningEngine, documents?: DocumentsEngine, automations?: AutomationRuntime, zenfluence?: ZenfluenceDirectory, ontology?: OntologyReader, approvalRefusal?: string, agentTests?: Pick<AgentTestsEngine, "snapshot">): Promise<void> {
   const server = new McpServer({ name: "magentic-pipelines", version: "0.1.0" }, {
     instructions: bots ? "Track workflows and inspect bot timelines. Bot execution and file application require the local application session." : "Track manual development handoffs and Jira previews. These tools do not execute code, invoke LLMs, send Jira requests, merge, or deploy.",
   });
   const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   registerWorkspaceReads(server, workspace, engine, documents, ontology);
+  if (agentTests) registerEvaluationInspection(server, workspace, agentTests);
   if (automations) registerAutomationInspection(server, automations, workspace);
   if (zenfluence) registerZenfluenceReads(server, zenfluence, workspace);
   server.registerTool("start_pipeline_run", { description: "Start a manual development run. A repeated requestId reuses the same run. Jira actions remain previews.",

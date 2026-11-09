@@ -8,7 +8,7 @@ export function botResponseFormat(bot: BotPolicy, tools: readonly string[], sour
     type: "object", additionalProperties: false,
     properties: {
       type: { const: "tool" }, name: { const: name },
-      arguments: name === "read_project_file"
+      arguments: name === "read_project_file" || name === "profile_project_file"
         ? { type: "object", properties: { path: { type: "string", minLength: 1, maxLength: 250 } }, required: ["path"], additionalProperties: false }
         : { type: "object", properties: {}, additionalProperties: false },
     },

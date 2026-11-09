@@ -1,6 +1,7 @@
 import { ZenfluenceError, type ZenfluenceDirectory } from "./zenfluence.js";
 import { newlyAssigned } from "./agent-configurables.js";
 import { passedCurrentTest } from "./agent-tests-model.js";
+import { buildEvaluationBundle } from "./evaluation-bundle.js";
 import { pipelineSchema, type PipelineConfig } from "./pipeline.js";
 import { zenfluenceCommand } from "./zenfluence-api.js";
 import { AutomationError, type AutomationRuntime } from "./automation-runtime.js";
@@ -23,7 +24,9 @@ import { PermissionError } from "../registry/roles.js";
 import { approve, authorDraft, requestChanges, retire, submit, TransitionError, type TransitionContext } from "../registry/transition.js";
 import { DEFAULT_WORKFLOW } from "../registry/workflow.js";
 import { handleWorkspaceMcp, workspaceMcpOverview } from "./mcp-portal.js";
-import { chatRequestSchema, runBaseChat, runWorkspaceAgent, untilAborted, type ChatConfiguration, type ChatEvent } from "./chat.js";
+import { chatRequestSchema, describeToolUse, runBaseChat, runWorkspaceAgent, untilAborted, type ChatConfiguration, type ChatEvent, type MeasuredToolUse } from "./chat.js";
+import { GroundingError } from "./chat-grounding.js";
+import { buildConnectionsDirectory, createOperationLog } from "./connections-directory.js";
 import type { EmailPortal } from "./email.js";
 
 import { PipelineError, type PipelineEngine } from "./pipeline.js";
@@ -39,7 +42,7 @@ import { CADENCES, type LearningEngine } from "./learning-schedule.js";
 import { DocumentError, type DocumentsEngine } from "./documents.js";
 import { StudioStorageError } from "./studio/store.js";
 
-import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit } from "./audit-package.js";
+import { buildAuditPackage, buildWorkspaceAudit, renderAuditPackage, renderWorkspaceAudit, type AuditActivity } from "./audit-package.js";
 import { randomUUID } from "node:crypto";
 import { declarationBrief, verifiedDeclarationSample } from "./declaration-sample.js";
 import { isDeclarationMaterial } from "./materials.js";
@@ -71,6 +74,8 @@ export interface WorkbenchOptions {
   demo?: boolean;
   email?: EmailPortal;
   chat?: ChatConfiguration;
+  /** The whole budget for one chat request, model turns and tool calls together. Default two minutes. */
+  chatTimeoutMs?: number;
   chatAccess?: ChatAccess;
   ontology?: OntologyDirectory;
   pipelines?: PipelineEngine;
@@ -122,6 +127,19 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
   // same version. A database-backed deployment needs a transaction as well.
   let pending: Promise<void> = Promise.resolve();
   const activeChats = new Set<string>();
+  // The last real operation through each connector, so the Connections directory can say what actually worked.
+  const operations = createOperationLog();
+  // What each model proved in this process, per workspace: it followed the required reads, or it did not.
+  const measuredToolUse = new Map<string, MeasuredToolUse>();
+  const measure = (workspaceId: string, actor: string, model: string, event: ChatEvent) => {
+    const key = JSON.stringify([workspaceId, actor, model]);
+    if (event.type === "answer" && event.evidence) measuredToolUse.set(key, { at: new Date().toISOString(), grounded: event.evidence.grounded, required: event.evidence.required, calls: event.evidence.calls.length, modelCalls: event.evidence.calls.filter(call => call.initiatedBy === "model" && !call.isError).length });
+    if (event.type === "error" && /No answer was accepted/.test(event.message)) measuredToolUse.set(key, { at: new Date().toISOString(), grounded: false, required: [], calls: 0 });
+  };
+  const withMeasure = (workspaceId: string, actor: string, choices: { id: string; detail: string }[]) => choices.map(choice => {
+    const measured = measuredToolUse.get(JSON.stringify([workspaceId, actor, choice.id]));
+    return { ...choice, ...(measured ? { measured } : {}), detail: [choice.detail, describeToolUse(measured)].filter(Boolean).join(" · ") };
+  });
   return createServer(async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
@@ -171,6 +189,45 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       const { workspaceId, actor } = identity;
       const roles = await options.context.members!.rolesFor(workspaceId, actor);
       if (!roles.length) throw new PermissionError("You are not a member of this workspace.");
+      if (request.method === "GET" && path === "/api/health") {
+        const pipeline = options.pipelines?.snapshot(workspaceId);
+        send(response, 200, { status: "ok", workspaceId,
+          persistence: pipeline?.storage ?? "unconfigured", writerMode: "single-process",
+          capabilities: { workflows: !!pipeline, agentTests: !!options.agentTests,
+            agentPackages: !!options.agentTests, models: !!options.chat,
+            ontology: !!options.ontology?.(workspaceId), externalActions: !!options.jira || !!options.automations },
+          note: "Workflow state was readable. This does not verify upstream services, durable backups or multi-instance readiness." });
+        return;
+      }
+      if (request.method === "GET" && path === "/api/connections") {
+        // One directory, built from the runtimes' own summaries. It holds no credential and no second copy of any setting.
+        let models: { options: Awaited<ReturnType<NonNullable<ChatConfiguration["modelOptions"]>>>; error?: string } | undefined;
+        if (options.chat) {
+          try {
+            const config = options.chatAccess ? await options.chatAccess.configuration(workspaceId, actor) : options.chat;
+            models = { options: config.modelOptions ? await config.modelOptions() : (await (config.listModels?.() ?? Promise.resolve([config.model]))).map(id => ({ id, label: id, provider: config.provider, available: true, local: config.provider === "ollama", detail: "" })) };
+          } catch { models = { options: [], error: "Could not list models. Make sure the model service is running, then refresh." }; }
+        }
+        const access = options.chatAccess ? await options.chatAccess.summary(workspaceId, actor) : undefined;
+        const ontology = options.ontology?.(workspaceId)?.catalog();
+        const bots = options.bots?.snapshot(workspaceId);
+        const automation = options.automations?.inspect(workspaceId);
+        const finished = automation?.actions.filter(item => item.finishedAt).sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!))[0];
+        const toolCount = 3 + (options.pipelines ? 2 : 0) + (options.documents ? 2 : 0) + (options.zenfluence?.(workspaceId) ? 1 : 0) + (ontology ? 4 : 0);
+        send(response, 200, { workspaceId, generatedAt: new Date().toISOString(), entries: buildConnectionsDirectory({ workspaceId, actor, log: operations, models,
+          personal: access?.connections.map(item => ({ provider: item.provider, models: item.models })),
+          workspaceConnections: access?.workspaceConnections,
+          zenfluence: options.zenfluence?.(workspaceId)?.summary() ?? { configured: false },
+          documents: options.documents ? { count: options.documents.snapshot(workspaceId).documents.length } : undefined,
+          ontology: ontology ? { mode: ontology.mode, ontology: ontology.ontology, objectTypes: ontology.objectTypes.length } : undefined,
+          repository: options.bots ? (bots?.project ? { root: bots.project.root, checks: bots.project.checks.length } : null) : undefined,
+          mcpTools: { count: toolCount },
+          jira: options.jira?.summary(workspaceId),
+          automations: automation ? { units: automation.units.length, enabled: automation.units.filter(unit => unit.enabled).length, actions: automation.actions.length, ...(finished ? { lastFinished: { at: finished.finishedAt!, status: finished.status } } : {}) } : undefined,
+          identity: { managed: !!options.accounts, actor, roles },
+          billing: access ? { tier: access.tier, ...(access.plan ? { plan: access.plan } : {}), managedReady: access.managedReady } : undefined,
+        }) }); return;
+      }
       if (request.method === "GET" && path === "/api/zenfluence") {
         // The workspace id is included so an unconfigured page can show exactly
         // what to put in the connection file.
@@ -206,6 +263,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         const records = await options.context.store.list(workspaceId);
         send(response, 200, {
           ...(options.pipelines ? { pipelines: options.pipelines.snapshot(workspaceId) } : {}),
+          ...(options.agentTests ? { agentPackages: options.agentTests.packages.snapshot(workspaceId, (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals) } : {}),
           ...(options.analyst ? { analyst: options.analyst.snapshot(workspaceId) } : {}),
           ...(options.bots ? { bots: options.bots.snapshot(workspaceId) } : {}),
           ...(options.scheduler ? { schedule: options.scheduler.snapshot(workspaceId) } : {}),
@@ -215,6 +273,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
           ...(options.jira ? { jira: { canReview: !!identity.canDeliverJira && roles.includes("admin") } } : {}),
           ...studioSnapshot(options.studio, workspaceId),
           canAuthor: roles.includes("admin") || roles.includes(workflow.roles.author),
+          ...(options.context.members!.approvers ? { approvers: await options.context.members!.approvers(workspaceId) } : {}),
           records: records.map((record) => ({
             ...record, hash: hashDefinition(record.definition),
             eligible: isServable(record, workflow), validApprovers: validApprovers(record),
@@ -241,10 +300,41 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       if (path === "/api/agent-tests" && request.method === "GET" && options.agentTests) {
         send(response, 200, options.agentTests.snapshot(workspaceId)); return;
       }
+      if (path === "/api/agent-evaluation-export" && request.method === "GET" && options.agentTests) {
+        if (!roles.includes("author") && !roles.includes("admin")) throw new PermissionError("An author or admin exports evaluation evidence.");
+        const query = Object.fromEntries(new URL(request.url!, "http://localhost").searchParams);
+        const { runId } = z.object({ runId: z.string().uuid() }).strict().parse(query);
+        const run = options.agentTests.snapshot(workspaceId).runs.find(item => item.id === runId && item.workspaceId === workspaceId);
+        if (!run) throw new RequestError(404, "This evaluation is not in this workspace.");
+        const bundle = buildEvaluationBundle(workspaceId, run);
+        response.setHeader("Content-Disposition", `attachment; filename="evaluation-${runId}.json"`);
+        response.setHeader("Cache-Control", "no-store");
+        send(response, 200, bundle); return;
+      }
+      if (path === "/api/agent-package-export" && request.method === "GET" && options.agentTests) {
+        const id = z.string().uuid().parse(new URL(request.url!, "http://localhost").searchParams.get("id"));
+        const exported = options.agentTests.packages.exportPackage(workspaceId, id,
+          (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals);
+        response.setHeader("Content-Disposition", `attachment; filename="agent-package-${id}.json"`);
+        send(response, 200, exported); return;
+      }
       if (path === "/api/audit-package" && request.method === "GET" && options.pipelines) {
         // One run's chain of custody as a file. Any member may read it; it only contains what the run page already shows.
         const query = new URL(request.url!, "http://localhost").searchParams;
         const markdown = query.get("format") === "markdown";
+        const attempts = options.bots?.snapshot(workspaceId).attempts ?? [];
+        const analystJobs = options.analyst?.snapshot(workspaceId).jobs ?? [];
+        const activityForRun = (run: { id: string }): AuditActivity[] => [
+          ...attempts.filter(attempt => attempt.runId === run.id).map(attempt => ({
+            executionId: attempt.id, runId: run.id, kind: "worker" as const, status: attempt.status, model: attempt.model,
+            events: attempt.events, note: "Recorded worker log, bounded to the latest 50 events; not a claim of a complete provider transcript.",
+          })),
+          ...analystJobs.filter(job => job.runId === run.id).map(job => ({
+            executionId: job.id, runId: run.id, kind: "analyst" as const, status: job.status,
+            events: job.trace.map(trace => ({ at: trace.startedAt, message: `${trace.tool}: ${trace.outcome}. ${trace.reason} ${trace.summary}` })),
+            note: "Recorded source-tool trace; no language-model token usage is inferred.",
+          })),
+        ];
         const deliver = (name: string, text: string) => {
           response.writeHead(200, { "Content-Type": markdown ? "text/markdown; charset=utf-8" : "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${name}.${markdown ? "md" : "json"}"` });
@@ -252,12 +342,12 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         };
         if (query.get("scope") === "workspace") {
           // The whole workspace: every run's package plus the definition audit log, under one bundle hash.
-          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor });
+          const bundle = buildWorkspaceAudit(options.pipelines.snapshot(workspaceId).runs, await options.context.audit.list(workspaceId), { workspaceId, actor, activityForRun });
           deliver(`workspace-audit-${workspaceId}`, markdown ? renderWorkspaceAudit(bundle) : JSON.stringify(bundle, null, 2)); return;
         }
         const run = options.pipelines.snapshot(workspaceId).runs.find(item => item.id === query.get("run"));
         if (!run) throw new RequestError(404, "Run not found in this workspace.");
-        const pkg = buildAuditPackage(run, { workspaceId, actor });
+        const pkg = buildAuditPackage(run, { workspaceId, actor, activity: activityForRun(run) });
         deliver(`audit-package-${run.id}`, markdown ? renderAuditPackage(pkg) : JSON.stringify(pkg, null, 2)); return;
       }
       if ((path === "/api/chat/models" || path === "/api/agent-studio/models") && request.method === "GET") {
@@ -265,14 +355,17 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         if (path === "/api/chat/models" && options.chatAccess) {
           const config = await options.chatAccess.configuration(workspaceId, actor);
           const choices = await config.modelOptions!();
-          send(response, 200, { models: choices.filter(model => model.available).map(model => model.id), options: choices,
+          send(response, 200, { models: choices.filter(model => model.available).map(model => model.id), options: withMeasure(workspaceId, actor, choices),
             access: await options.chatAccess.summary(workspaceId, actor) }); return;
         }
         if (!options.chat) { send(response, 200, { models: [] }); return; }
         try {
-          if (options.chat.modelOptions) {
-            const choices = await options.chat.modelOptions();
-            send(response, 200, { models: choices.filter((model) => model.available).map((model) => model.id), options: choices });
+          // Agent Studio lists what agents in this workspace can actually load: the server catalog plus the workspace's own connections.
+          // Never a member's personal credentials: the agent catalog is the server catalog plus the workspace's own connections.
+          const studio = options.chatAccess?.agentConfiguration ? await options.chatAccess.agentConfiguration().forWorkspace!(workspaceId) : options.chat;
+          if (studio.modelOptions) {
+            const choices = await studio.modelOptions();
+            send(response, 200, { models: choices.filter((model) => model.available).map((model) => model.id), options: withMeasure(workspaceId, actor, choices) });
             return;
           }
           const models = options.chat.listModels ? await options.chat.listModels() : [options.chat.model];
@@ -295,11 +388,21 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       const raw = await body(request);
       if (path === "/api/zenfluence") {
         if (!options.zenfluence) throw new RequestError(404, "Zenfluence is not configured.");
-        send(response, 200, await zenfluenceCommand(options.zenfluence, options.pipelines, { workspaceId, actor, roles }, raw)); return;
+        const action = (raw as { action?: unknown })?.action;
+        try {
+          const result = await zenfluenceCommand(options.zenfluence, options.pipelines, { workspaceId, actor, roles }, raw);
+          operations.record(workspaceId, "sources:zenfluence", true, `${String(action)} succeeded.`);
+          send(response, 200, result); return;
+        } catch (error) {
+          if (error instanceof ZenfluenceError && error.status >= 500) operations.record(workspaceId, "sources:zenfluence", false, error.message);
+          throw error;
+        }
       }
       if (path === "/api/automation-units" && options.automations) {
         if (!identity.canRunAutomations) throw new PermissionError("Automation commands require the company application session.");
-        send(response, 200, await options.automations.execute({ workspaceId, actor, roles }, raw)); return;
+        const outcome = await options.automations.execute({ workspaceId, actor, roles }, raw);
+        if ("action" in outcome && outcome.dispatched) operations.record(workspaceId, "delivery:automation", outcome.action.status === "succeeded", `Unit ${outcome.action.unitId}: ${outcome.action.status}.`);
+        send(response, 200, outcome); return;
       }
       if (path === "/api/chat/history" && options.chatAccess) {
         try { send(response, 200, options.chatAccess.history.execute(workspaceId, actor, raw)); }
@@ -307,7 +410,16 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         return;
       }
       if (path === "/api/chat/connections" && options.chatAccess) {
-        await options.chatAccess.connect(workspaceId, actor, raw);
+        // A workspace connection is shared with every agent in the workspace, so only an administrator may add, test or remove one.
+        const shared = (raw as { scope?: unknown })?.scope === "workspace";
+        if (shared && !roles.includes("admin")) throw new PermissionError("A workspace administrator must manage workspace connections.");
+        try {
+          await options.chatAccess.connect(workspaceId, actor, raw);
+          if (shared) operations.record(workspaceId, `models:workspace:${String((raw as { provider?: unknown })?.provider)}`, true, `${String((raw as { action?: unknown })?.action)} succeeded.`);
+        } catch (error) {
+          if (shared) operations.record(workspaceId, `models:workspace:${String((raw as { provider?: unknown })?.provider)}`, false, error instanceof Error ? error.message : "Connection update failed.");
+          throw error;
+        }
         send(response, 200, await options.chatAccess.summary(workspaceId, actor)); return;
       }
       if (path === "/api/chat/access" && options.chatAccess) {
@@ -317,7 +429,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         return;
       }
       if (path === "/api/chat-mcp" && options.chatAccess) {
-        await handleChatMcp(options.chatAccess, workspaceId, actor, async () => (await options.context.members!.rolesFor(workspaceId, actor)).length > 0, request, response, raw);
+        await handleChatMcp(options.chatAccess, workspaceId, actor, async () => (await options.context.members!.rolesFor(workspaceId, actor)).length > 0, request, response, raw, options.chatTimeoutMs);
         return;
       }
       if (path === "/api/account/billing") {
@@ -332,12 +444,18 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         if (!ontology) throw new RequestError(404, "Ontology is not configured for this workspace.");
         const controller = new AbortController();
         response.once("close", () => controller.abort());
-        send(response, 200, ontologyMaterial(await ontology.get(raw, controller.signal)));
+        try {
+          const material = ontologyMaterial(await ontology.get(raw, controller.signal));
+          operations.record(workspaceId, "sources:ontology", true, "Object read and attached.");
+          send(response, 200, material);
+        } catch (error) { operations.record(workspaceId, "sources:ontology", false, "The object read failed."); throw error; }
         return;
       }
       if (path === "/api/jira" && options.jira) {
         if (!identity.canDeliverJira) throw new PermissionError("Jira commands require the local application session.");
-        send(response, 200, await options.jira.execute({ workspaceId, actor, roles }, raw));
+        const outcome = await options.jira.execute({ workspaceId, actor, roles }, raw);
+        if ("action" in outcome && outcome.dispatched) operations.record(workspaceId, "delivery:jira", outcome.action.status === "sent", `${outcome.action.intent.operation}: ${outcome.action.status}.`);
+        send(response, 200, outcome);
         return;
       }
       if (path === "/api/studio") {
@@ -365,6 +483,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         await pending;
         // The engine validates the command and runs the pipeline or studio command as this person.
         const state = options.documents.execute(workspaceId, actor, roles, raw);
+        if ((raw as { action?: unknown })?.action === "add_document") operations.record(workspaceId, "sources:documents", true, "Document saved.");
         tickScheduler(workspaceId);
         send(response, 200, state);
         return;
@@ -381,6 +500,14 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
       }
       if (path === "/api/bots" && options.bots) {
         send(response, 200, await options.bots.execute(workspaceId, actor, roles, raw, (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals));
+        return;
+      }
+      if (path === "/api/agent-packages") {
+        if (!options.agentTests) throw new RequestError(503, "Agent packages need the configured test and repository runtime. This deployment has not enabled it.");
+        if (identity.recentSignIn === false && (raw as { action?: unknown })?.action === "approve") throw new PermissionError("Sign in again before approving a package.");
+        const currentRoles = await options.context.members!.rolesFor(workspaceId, actor);
+        send(response, 200, options.agentTests.packages.execute(workspaceId, actor, currentRoles, raw,
+          (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals));
         return;
       }
       if (path === "/api/agent-tests" && options.agentTests) {
@@ -415,7 +542,7 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         if (!options.pipelines) throw new RequestError(404, "Pipelines are not configured.");
         await pending;
         const approvals = (options.context.workflow ?? DEFAULT_WORKFLOW).requiredApprovals;
-        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence, options.ontology?.(workspaceId), identity.recentSignIn === false ? "Sign in again before approving this handoff." : undefined);
+        if (path === "/api/pipeline-mcp") await handlePipelineMcp(options.pipelines, workspaceId, actor, roles, approvals, request, response, raw, options.bots, options.jira, options.studio ? assistantDirectory(options.studio) : undefined, options.learning, options.documents, options.automations, options.zenfluence, options.ontology?.(workspaceId), identity.recentSignIn === false ? "Sign in again before approving this handoff." : undefined, options.agentTests);
         else {
           if ((raw as { action?: unknown })?.action === "prepare_declaration_brief") {
             const input = z.object({ action: z.literal("prepare_declaration_brief"), runId: z.string().uuid(),
@@ -445,6 +572,14 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
             if (untested.length) throw new RequestError(409, `Run a passing test on the current version of ${untested.map(agent => agent.name).join(", ")} before assigning it to a stage.`);
           }
           if (identity.recentSignIn === false && (raw as { action?: unknown })?.action === "approve") throw new PermissionError("Sign in again before approving this handoff.");
+          // A handoff proposed to someone who cannot sign would never complete, so names are checked against the directory here.
+          const named = (raw as { reviewers?: unknown })?.reviewers;
+          if (Array.isArray(named)) {
+            for (const reviewer of named) {
+              const reviewerRoles = typeof reviewer === "string" ? await options.context.members!.rolesFor(workspaceId, reviewer) : [];
+              if (!reviewerRoles.includes("approver") && !reviewerRoles.includes("admin")) throw new RequestError(400, `${String(reviewer).slice(0, 200)} cannot approve handoffs in this workspace. Name an approver or admin.`);
+            }
+          }
           const start = (raw as { action?: unknown })?.action === "start" && options.pipelines.start;
           send(response, 200, start ? await start(workspaceId, actor, roles, raw, approvals) : options.pipelines.execute(workspaceId, actor, roles, raw, approvals));
         }
@@ -476,10 +611,12 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
         const chat = prepared?.config ?? options.chat;
         const outputLimit = prepared ? prepared.maxOutputTokens : input.maxOutputTokens;
         const selectedModel = prepared?.model ?? input.model ?? chat.model;
+        let connector = chat.provider === "ollama" ? "models:local" : "models:server";
         if (chat.modelOptions) {
           const choice = (await chat.modelOptions()).find((model) => model.id === selectedModel);
           if (!choice) throw new RequestError(400, "Choose a model from the model selector.");
           if (!choice.available) throw new RequestError(503, choice.detail);
+          connector = choice.local ? "models:local" : "models:server";
           if (outputLimit !== undefined && !choice.outputLimit) throw new RequestError(400, "This model uses the provider default output cap.");
         } else {
           let models: string[];
@@ -488,17 +625,26 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
           if (outputLimit !== undefined && !chat.outputLimit) throw new RequestError(400, "This model uses the provider default output cap.");
           if (!models.includes(selectedModel)) throw new RequestError(400, "Choose a connected model from the model selector. Refresh the list if it changed.");
         }
+        const personal = selectedModel.startsWith("personal/");
+        if (personal) connector = `models:${selectedModel.split("/")[1]}`;
+        if (selectedModel.startsWith("workspace/")) connector = `models:workspace:${selectedModel.split("/")[1]}`;
         const key = JSON.stringify([workspaceId, actor]);
         if (activeChats.has(key) || activeChats.size >= 4) throw new RequestError(429, "A chat is already running. Wait for it to finish or stop it before trying again.");
         const releaseAccess = options.chatAccess?.acquire(workspaceId, actor);
         activeChats.add(key);
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120_000);
+        const budgetMs = options.chatTimeoutMs ?? 120_000;
+        const endsAt = Date.now() + budgetMs;
+        const timeout = setTimeout(() => controller.abort(), budgetMs);
+        // Stop in the browser or a dropped connection aborts the model request and every tool call behind it.
         response.once("close", () => controller.abort());
         const started = performance.now();
         const messages = contextMessages(input.messages, input.history ?? "all");
         const emit = (event: ChatEvent) => {
           const result = event.type === "answer" && input.metrics ? { ...event, elapsedMs: Math.round(performance.now() - started) } : event;
+          if (!baseChat) measure(workspaceId, actor, selectedModel, event);
+          if (event.type === "answer") operations.record(workspaceId, connector, true, `${selectedModel} answered${event.usage ? ` (${event.usage.promptTokens} in, ${event.usage.completionTokens} out)` : ""}.`, personal ? actor : undefined);
+          if (event.type === "error" && !/No answer was accepted/.test(event.message)) operations.record(workspaceId, connector, false, event.message, personal ? actor : undefined);
           if (!response.destroyed) response.write(JSON.stringify(result) + "\n");
         };
         // Long CPU inference can leave the stream idle. Opt-in clients receive
@@ -507,18 +653,20 @@ export function createWorkbenchServer(options: WorkbenchOptions) {
           if (response.headersSent && !controller.signal.aborted) emit({ type: "thinking", message: "Still working…" });
         }, 15_000) : undefined;
         try {
-          await pending;
+          await untilAborted(pending, controller.signal);
           response.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "X-Accel-Buffering": "no" });
+          emit({ type: "budget", ms: budgetMs });
           emit({ type: "thinking", message: "Connecting to the model…" });
           if (prepared?.route) emit({ type: "route", ...prepared.route });
           const model = await untilAborted(chat.loadModel(selectedModel, outputLimit === undefined ? undefined : { maxOutputTokens: outputLimit }), controller.signal);
           if (baseChat) await runBaseChat(messages, model, controller.signal, emit);
-          else await runWorkspaceAgent(options.context, workspaceId, actor, messages, model, controller.signal, emit, options.ontology?.(workspaceId), persona, { pipelines: options.pipelines, documents: options.documents });
+          else await runWorkspaceAgent(options.context, workspaceId, actor, messages, model, controller.signal, emit, options.ontology?.(workspaceId), persona, { pipelines: options.pipelines, documents: options.documents, zenfluence: options.zenfluence }, { endsAt });
         } catch (error) {
           // Provider errors can include endpoint details or credentials. The
           // browser receives a useful failure without echoing those internals.
-          emit({ type: "error", message: error instanceof ChatAccessError ? error.message : controller.signal.aborted
-            ? "The request stopped or exceeded two minutes. Try a shorter question."
+          const seconds = budgetMs / 1000;
+          emit({ type: "error", message: error instanceof ChatAccessError || error instanceof GroundingError ? error.message : controller.signal.aborted
+            ? `The request stopped or exceeded its ${seconds} second budget. Try a shorter question, or raise MAGENTIC_CHAT_TIMEOUT_SECONDS on the server.`
             : "The model could not complete this request. Check its connection and model settings, then try again." });
         } finally {
           clearTimeout(timeout);

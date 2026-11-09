@@ -115,9 +115,11 @@ test("provider keys and connections are isolated by both workspace and member", 
 
 test("personal models use only their owner's credential and remain available on Free", async () => {
   const f = fixture(false);
+  let inferenceCalls = 0;
   const request = (async (url, init) => {
     assert.equal((init!.headers as Record<string, string>).Authorization, "Bearer private-test-key");
     if (String(url).endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "text-model" }] }));
+    inferenceCalls++;
     assert.equal(String(url), "https://api.openai.com/v1/responses");
     assert.equal(JSON.parse(String(init!.body)).max_output_tokens, 512);
     return new Response(JSON.stringify({ output: [{ type: "message", content: [{ type: "output_text", text: '{"type":"answer","content":"ok"}' }] }] }));
@@ -130,6 +132,8 @@ test("personal models use only their owner's credential and remain available on 
   await assert.rejects((await access.configuration("w", "b")).loadModel("personal/openai/text-model"), /not available/);
   await access.connect("w", "a", { action: "disconnect", provider: "openai" });
   await assert.rejects(config.loadModel("personal/openai/text-model"), /removed/);
+  await assert.rejects(model.invoke("A cached model must not bypass disconnect."), /removed or changed/);
+  assert.equal(inferenceCalls, 1);
 });
 
 test("the file vault encrypts secrets and refuses a moved record", t => {

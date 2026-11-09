@@ -66,3 +66,30 @@ when truncated. Nothing trains, publishes, advances or approves automatically.
 API contracts:
 - https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/
 - https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/
+
+## Workspace journey
+
+1. Open **Zenfluence**, then choose **Paste a link**. Paste a Jira issue URL
+   (`https://<site>.atlassian.net/browse/PROJECT-123`) or a Confluence page URL
+   (`/wiki/spaces/<space>/pages/123456/<title>` or `/wiki/pages/viewpage.action?pageId=123456`).
+2. Read the source and check its revision and excerpt. The server resolves the
+   resource ID and requests only the configured host; it never fetches an
+   arbitrary pasted URL. Boards, short links and other sites are refused.
+3. Choose an open work item and attach the snapshot. Run the assigned agent,
+   check citations and complete the workflow's independent review.
+4. If the workflow has a configured Jira action, review the saved event in
+   **Workflow operations** before delivery. Import is not publish. Confluence
+   page publishing is not implemented.
+
+For API clients the same read accepts
+`{"action":"read","source":{"kind":"link","id":"https://<site>.atlassian.net/browse/PROJECT-123"}}`.
+The response uses canonical `kind` (`jira` or `confluence`) and `id`, which can
+be used by the existing attach contract. The expandable REST API guide in the
+workspace describes request bodies, response fields, membership and conflict
+handling without exposing credentials.
+
+**Configured** means settings are present, not that Atlassian has accepted them.
+Only a successful source read verifies access to that source. This connector does
+not provide a personal OAuth account-linking flow or a Data Center/government
+endpoint adapter. A locally functioning demo is not authorization to process
+controlled federal data.

@@ -1,3 +1,8 @@
+import { addServiceDescriptions } from "./service-descriptions.js";
+import { femaWorkspacePage } from "./fema-workspace-view.js";
+import { baseWorkspacePage } from "./base-workspace-view.js";
+import { resourceContext, resourcePrompt, resourceDialog, resourceBanner, resourceDocument, type ResourceContext, type ResourceTask } from "./resource-assistant.js";
+import { agentPackagesPage } from "./agent-packages-view.js";
 import { createZenfluenceView } from "./zenfluence-controller.js";
 import type { SavedChat, SavedChatSummary } from "./chat-history.js";
 import { createWorkflowCanvas } from "./workflow-canvas-controller.js";
@@ -5,6 +10,7 @@ import { sessionHeaders } from "./session-headers.js";
 import { workforceMarketplacePage } from "./workforce-marketplace-view.js";
 import { installWorkforceAgents, workforceTemplates } from "./workforce-marketplace.js";
 import { chatConnectionsPage, type ConnectionFeedback } from "./chat-connections-view.js";
+import type { ConnectionEntry } from "./connections-directory.js";
 import type { ChatAccessSummary } from "./chat-access.js";
 import { accountPage, type AccountSummary } from "./account-view.js";
 import type { OntologyCatalog } from "./ontology.js";
@@ -43,10 +49,12 @@ import { pipelineView } from "./pipeline-view.js";
 import type { PipelineSnapshot, PipelineConfig } from "./pipeline.js";
 import { emptyStudioUi, studioListPage, studioProjectPage, type Page, type StudioUi } from "./studio-view.js";
 import { analystPage } from "./analyst-view.js";
+import { systemDemoPage } from "./system-demo-view.js";
+import { ANALYST_EXAMPLES, analystBrief } from "./analyst-brief.js";
 import { documentsPage } from "./documents-view.js";
 import { activityPage, approvalDetailPage, approvalsQueuePage, evaluationDetailPage, evaluationsListPage } from "./review-views.js";
 import { assistantDetailPage, assistantsListPage, WORKSPACE_ASSISTANT } from "./assistants-view.js";
-import { homeView, navCounts } from "./home-view.js";
+import { navCounts } from "./home-view.js";
 import { mountOperationsQueue } from "./operations-queue.js";
 import type { Root } from "react-dom/client";
 import { workflowPage } from "./workflow-view.js";
@@ -84,6 +92,7 @@ let operationsRoot: Root | undefined;
 let filter = "all";
 node(".skip-link").addEventListener("click", event => { event.preventDefault(); node("main").focus(); });
 const servicesDialog = node<HTMLDialogElement>("#workspace-navigation");
+addServiceDescriptions(servicesDialog);
 function closeNavigation(): void {
   if (servicesDialog.open) servicesDialog.close();
 }
@@ -116,7 +125,7 @@ function filterServices(): void {
   for (const group of servicesDialog.querySelectorAll<HTMLElement>(".service-group")) {
     let visible = false;
     for (const link of group.querySelectorAll<HTMLElement>("a.nav")) {
-      const matches = `${group.querySelector("h3")?.textContent} ${link.textContent}`.toLowerCase().includes(query);
+      const matches = `${group.querySelector("h3")?.textContent} ${link.textContent} ${link.dataset.search ?? ""}`.toLowerCase().includes(query);
       link.hidden = !matches || (link.id === "company-navigation" && !companyMode);
       visible ||= !link.hidden;
     }
@@ -163,7 +172,7 @@ themeSelect.addEventListener("change", () => {
  * the back button, a reload and a pasted link all land in the same place.
  */
 interface Route { view: string; id?: string; sub?: string; query: URLSearchParams }
-const PRIMARY_VIEWS = ["analyst", "zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
+const PRIMARY_VIEWS = ["fema", "demo", "analyst", "zenfluence", "canvas", "marketplace", "connections", "base-chat", "chat", "account", "agent-studio", "workspace", "assistants", "workflows", "studio", "documents", "evaluations", "approvals", "activity"];
 const LEGACY_VIEWS = ["desk", "pipelines", "agents", "email", "mcp", "workflow", "chat"];
 function parseRoute(hash: string): Route {
   const [path, search = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -214,6 +223,9 @@ let botPoll: ReturnType<typeof setTimeout> | undefined;
 let pipelineDraft: PipelineConfig | undefined;
 let runRequestId = crypto.randomUUID();
 let chatState = emptyChat();
+let previousResourceChat: { state: typeof chatState; scope: string } | undefined;
+let pendingResource: ResourceContext | undefined;
+let pendingResourceScope = "";
 const workflowCanvas = createWorkflowCanvas({
   snapshot: () => snapshot, active: () => view === "canvas", busy: () => busy,
   render, notify, lock, save: command => api("/api/pipeline", command), refresh,
@@ -265,6 +277,13 @@ async function api(path: string, data?: unknown, workspace = selectedWorkspace):
     cache: "no-store",
   });
   const result = await response.json();
+  if (companyMode && response.status === 403 && path === "/api/workspace" && workspace === selectedWorkspace) {
+    ++refreshVersion;
+    chatController?.abort();
+    node("#records").textContent = "Workspace access changed. Choose an authorized company.";
+    location.assign("/companies");
+    throw new Error("Workspace membership could not be confirmed.");
+  }
   if (response.status === 401 && accountsEnabled) { location.assign("/login"); throw new Error("Sign in to continue."); }
   if (!response.ok) throw new Error(!companyMode && localMode && response.status === 401 ? "The local session expired. Close and reopen Agentick Developer to sign in again." : result.error ?? "Request failed.");
   return result;
@@ -301,7 +320,7 @@ function render(): void {
   node("#operator-context").textContent = `${snapshot.actor} · ${snapshot.roles.map(role => role === "approver" ? "Reviewer" : role === "admin" ? "Administrator" : role === "author" ? "Author" : role).join(", ") || "No assigned role"}`;
   node("#operator-context").title = `${node("#operator-context").textContent} · Workspace: ${snapshot.workspaceId}`;
   node("#environment-banner").innerHTML = snapshot.demo
-    ? (document.body.dataset.agentDemo === "openfema" ? "<strong>Federal Spaces demo</strong><span>Public OpenFEMA data · Offline Foundry replay · Demo reviewers</span>" : document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
+    ? (document.body.dataset.agentDemo === "system" ? '<strong>Federal workflow demo</strong><span>Saved public data · Scripted responses · Demo reviewers · <a href="#/demo">Walkthrough</a></span>' : document.body.dataset.agentDemo === "openfema" ? "<strong>OpenFEMA workspace</strong><span>Public OpenFEMA data · Offline Foundry replay · Demo reviewers</span>" : document.body.dataset.agentDemo ? `<strong>${document.body.dataset.agentDemo === "live" ? "Live local model" : "Scripted demo"}</strong><span>Synthetic documents · ${document.body.dataset.agentDemo === "live" ? "Ollama inference" : "No inference or token charges"}</span>` : "<strong>Demo environment</strong><span>Synthetic sample data only. No live agency service is connected.</span>")
     : companyMode ? "<strong>Company workspace</strong><span>Company membership controls access. Repository execution requires an isolated worker.</span>"
     : localMode ? "<strong>Local workspace</strong><span>Saved locally. Remote models receive sent content.</span>"
     : "<strong>Workspace session</strong><span>Verify deployment and data-handling settings before sensitive work.</span>";
@@ -309,7 +328,7 @@ function render(): void {
   document.body.classList.toggle("developer-desk", view === "desk");
   renderWorkspaces();
   if (!localMode) {
-    node(".workspace div").firstChild!.textContent = document.body.dataset.agentDemo === "openfema" ? "Federal Spaces demo" : document.body.dataset.agentDemo ? "Agent Studio demo" : snapshot.workspaceId;
+    node(".workspace div").firstChild!.textContent = ["openfema", "system"].includes(document.body.dataset.agentDemo ?? "") ? "OpenFEMA workspace" : document.body.dataset.agentDemo ? "Agent Studio demo" : snapshot.workspaceId;
   }
   node("#workspace-demo-note").hidden = !snapshot.demo;
   const primary = PRIMARY_VIEWS.includes(view);
@@ -337,7 +356,8 @@ function render(): void {
     node("#view").hidden = false;
     // A refused command is shown where the person is working, above the page it concerns.
     node("#view").innerHTML = (studioUi.error ? `<div class="inline-error" role="alert">${escape(studioUi.error)}</div>` : "") + page.body;
-    if (view === "workspace") operationsRoot = mountOperationsQueue(node("#operations-queue"), snapshot);
+    const queue = document.querySelector<HTMLElement>("#operations-queue");
+    if (view === "workspace" && queue) operationsRoot = mountOperationsQueue(queue, snapshot);
     if (view === "base-chat" || view === "chat" || (view === "assistants" && route.id)) { const transcript = document.querySelector(".chat-transcript"); if (transcript) transcript.scrollTop = transcript.scrollHeight; }
     return;
   }
@@ -349,28 +369,39 @@ function render(): void {
 function currentPage(): Page {
   switch (view) {
     case "analyst": return analystPage(snapshot, route.id, studioUi);
+    case "fema": return femaWorkspacePage(snapshot, route.id);
+    case "demo": return systemDemoPage(snapshot);
     case "zenfluence": return zenfluence.page();
     case "base-chat":
     case "chat": {
       const general = view === "base-chat";
       prepareChat(general ? "general" : "workspace", "");
       const modes = `<nav class="chat-modes" aria-label="Chat mode"><a href="#/base-chat" ${general ? 'aria-current="page"' : ""}>General</a><a href="#/chat" ${general ? "" : 'aria-current="page"'}>Workspace MCP</a><span>${general ? "Conversation only" : "Read-only workspace tools"}</span></nav>`;
-      return { title: "Chat", context: "", actions: '<a class="secondary" href="#/connections">Connections</a>', body: `<section class="chat-page">${modes}${chatView(snapshot.chat, chatState, [], { base: general, locked: true })}</section>` };
+      return { title: "Chat", context: "", actions: '<a class="secondary" href="#/connections">Connections</a>', body: `<section class="chat-page">${modes}${resourceBanner(chatState.resource, !!previousResourceChat)}${chatView(snapshot.chat, chatState, [], { base: general, locked: true, canDocument: !!snapshot.documents && snapshot.canAuthor })}</section>` };
     }
     case "connections": {
       const scope = selectedWorkspace + ":" + snapshot.actor;
       if (chatAccessScope !== scope) { chatAccess = undefined; chatAccessError = ""; connectionFeedback = undefined; chatAccessScope = scope; void loadChatAccess(); }
+      if (directoryScope !== scope) { directory = {}; directoryScope = scope; void loadDirectory(); }
       return chatConnectionsPage(chatAccess, chatAccessError, connectionFeedbackScope === scope ? connectionFeedback : undefined,
-        { models: chatState.options, loading: chatState.loadingModels, error: chatState.error });
+        { models: chatState.options, loading: chatState.loadingModels, error: chatState.error, demo: snapshot.demo }, directory, { admin: snapshot.roles.includes("admin"), origin: location.origin });
     }
     case "account": {
       if (accountScope !== selectedWorkspace + ":" + snapshot.actor) { accountSummary = undefined; accountError = undefined; accountScope = selectedWorkspace + ":" + snapshot.actor; void loadAccount(); }
       return accountPage(accountSummary, accountError);
     }
-    case "marketplace": return workforceMarketplacePage(snapshot, workspaceList?.workspaces.find(item => item.id === selectedWorkspace)?.name ?? snapshot.workspaceId, route.id, route.query.get("group") ?? undefined, route.query.get("q") ?? "", route.query.get("library") === "1");
-    case "agent-studio": return agentStudioPage(snapshot, route.id, route.query.get("preset"), agentModelScope === `${selectedWorkspace}:${snapshot.actor}` ? agentModels : [], studioUi,
+    case "marketplace":
+      if (route.query.get("collection") === "packages") return agentPackagesPage(snapshot, route.query.get("q") ?? "");
+      return workforceMarketplacePage(snapshot, workspaceList?.workspaces.find(item => item.id === selectedWorkspace)?.name ?? snapshot.workspaceId, route.id, route.query.get("group") ?? undefined, route.query.get("q") ?? "", route.query.get("library") === "1");
+    case "agent-studio":
+      if (!route.id && (agentTestsScope !== `${selectedWorkspace}:${snapshot.actor}` || !agentTests))
+        return { title: "Agent Studio", context: "Create, test and assign agents.",
+          body: agentTestsScope !== `${selectedWorkspace}:${snapshot.actor}`
+            ? '<p role="status">Loading agent test history…</p>'
+            : '<p role="alert">Test history could not be loaded. Use Refresh in the header to retry.</p>' };
+      return agentStudioPage(snapshot, route.id, route.query.get("preset"), agentModelScope === `${selectedWorkspace}:${snapshot.actor}` ? agentModels : [], studioUi,
       (["test", "workflow"].includes(route.sub ?? "") ? route.sub : "setup") as StudioSection, agentTestsScope === `${selectedWorkspace}:${snapshot.actor}` ? agentTests : undefined);
-    case "workspace": return { title: "Work queue", context: "Your next actions.", actions: snapshot.canAuthor ? '<button class="primary" data-work-new>+ New work item</button>' : "", body: hint("Open a work item to inspect its record, evidence, and next step. No action is executed from this queue.") + homeView(snapshot) };
+    case "workspace": return baseWorkspacePage(snapshot, route.query.get("tab"));
     case "assistants":
       // The chat below an assistant always speaks as that assistant.
       if (route.id) prepareChat("workspace", route.id === WORKSPACE_ASSISTANT ? "" : route.id);
@@ -392,7 +423,7 @@ function setHeading(page: Page): void {
   node("#title").textContent = page.title;
   node("#subtitle").textContent = page.context ?? "";
   node("#crumbs").innerHTML = page.crumbs ? page.crumbs.map(([label, href]) => `<a href="${escape(href)}">${escape(label)}</a> / `).join("") : "";
-  node("#page-actions").innerHTML = page.actions ?? "";
+  node("#page-actions").innerHTML = (page.actions ?? "") + (resourceContext(view, page.title, route.id) ? '<button class="secondary" id="ask-resource-agent">◆ Ask Agent</button>' : "");
   node("#breadcrumb").textContent = page.crumbs ? `${page.crumbs.map(([label]) => label).join(" / ")} / ${page.title}` : page.title;
   document.title = `${page.title} · Agentick`;
 }
@@ -433,7 +464,7 @@ function renderLegacy(): void {
   other.classList.toggle("pipeline-panel", view === "pipelines" || view === "desk");
   if (view === "desk") other.innerHTML = route.id && route.id !== "new" && !snapshot.pipelines?.runs.some(run => run.id === route.id)
     ? '<section class="panel"><div class="panel-body"><h2>Work item not found</h2><p>This record is not in the current workspace. It may have been removed or belong to another workspace.</p><a class="secondary" href="#/desk">Back to work items</a></div></section>'
-    : workspaceView(snapshot.pipelines, snapshot.bots, snapshot.actor, snapshot.roles, sessionDraft, draftMaterials, selectedRun, selectedPhase, sessionQuery, snapshot.ontology);
+    : workspaceView(snapshot.pipelines, snapshot.bots, snapshot.actor, snapshot.roles, sessionDraft, draftMaterials, selectedRun, selectedPhase, sessionQuery, snapshot.ontology, snapshot.approvers);
   if (view === "pipelines") other.innerHTML = pipelineView(snapshot.pipelines, snapshot.actor, snapshot.roles, selectedRun, pipelineDraft, snapshot.bots, selectedPhase, snapshot.jira);
   if (view === "mcp") other.innerHTML = mcpView(snapshot.mcp, inspector, new URL("/api/mcp", location.origin).href, snapshot.demo, snapshot.actor);
   if (view === "email") other.innerHTML = emailView(snapshot.mail, snapshot.actor, mailFolder, mailQuery, selectedMail);
@@ -511,6 +542,48 @@ document.addEventListener("click", async (event) => {
   const button = (event.target as Element).closest<HTMLElement>("button");
   if (!button || busy) return;
   if (!snapshot) { if (button.id === "refresh-workspace") void boot(); return; }
+  if (button.id === "ask-resource-agent") {
+    if (chatState.busy) { notify("Wait for the current answer or stop it before opening a resource chat."); return; }
+    const selectedDocument = view === "documents" ? [...snapshot.documents?.documents ?? []].sort((a, b) => b.addedAt.localeCompare(a.addedAt)).find(item => !route.id || item.id === route.id) : undefined;
+    pendingResource = resourceContext(view, selectedDocument?.title ?? node("#title").textContent ?? view, selectedDocument?.id ?? route.id ?? (view === "desk" ? selectedRun : undefined));
+    pendingResourceScope = `${selectedWorkspace}:${snapshot.actor}`;
+    if (!pendingResource) return;
+    const externalSource = view === "zenfluence" ? zenfluence.selectedSource() : undefined;
+    if (externalSource) pendingResource.source = externalSource;
+    node("#resource-assistant-content").innerHTML = resourceDialog(pendingResource);
+    node<HTMLDialogElement>("#resource-assistant").showModal(); return;
+  }
+  if (button.dataset.resourceTask) {
+    if (!pendingResource || chatState.busy || pendingResourceScope !== `${selectedWorkspace}:${snapshot.actor}`) return;
+    const task = button.dataset.resourceTask;
+    if (!["explain", "gaps", "document"].includes(task)) return;
+    if (!previousResourceChat) previousResourceChat = { state: chatState, scope: pendingResourceScope };
+    const loading = chatState.loadingModels;
+    chatState = { ...resetChat(chatState), channel: "workspace", profile: "", resource: pendingResource,
+      draft: resourcePrompt(pendingResource, task as ResourceTask) };
+    node<HTMLDialogElement>("#resource-assistant").close(); pendingResource = undefined;
+    navigate("#/chat");
+    if (loading) void loadChatModels();
+    document.querySelector<HTMLTextAreaElement>("#chat-input")?.focus(); return;
+  }
+  if (button.hasAttribute("data-resource-return")) {
+    if (chatState.busy || previousResourceChat?.scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
+    chatState = previousResourceChat.state; previousResourceChat = undefined;
+    if (chatState.loadingModels) void loadChatModels();
+    navigate(chatState.profile ? `#/assistants/${encodeURIComponent(chatState.profile)}` : chatState.channel === "general" ? "#/base-chat" : "#/chat"); return;
+  }
+  if (button.dataset.documentAnswer !== undefined) {
+    if (chatState.busy || !chatState.resource || !snapshot.documents || !snapshot.canAuthor) return;
+    const answer = chatState.messages[Number(button.dataset.documentAnswer)];
+    if (answer?.role !== "assistant") return;
+    if (studioUi.drafts["document-add"]?.text || studioUi.drafts["document-add"]?.title) {
+      notify("You already have an unsaved document. Save or clear it before preparing another.", true); return;
+    }
+    const draft = resourceDocument(chatState.resource, answer.content);
+    if (draft.text.length > 200000) { notify("This answer is too long for one document.", true); return; }
+    studioUi.drafts["document-add"] = draft;
+    navigate("#/documents"); notify("Review the draft, then choose Add document to save it."); return;
+  }
   if (button.id === "stop-chat") { chatController?.abort(); return; }
   if (button.id === "new-chat") { chatController?.abort(); chatState = resetChat(chatState); render(); return; }
   if (button.id === "refresh-models") { if (view === "agent-studio" || view === "canvas") void loadAgentModels(); else void loadChatModels(); return; }
@@ -646,7 +719,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 identity.addEventListener("change", async () => {
-  chatController?.abort(); chatState = emptyChat();
+  chatController?.abort(); chatState = emptyChat(); previousResourceChat = undefined; pendingResource = undefined; node<HTMLDialogElement>("#resource-assistant").close();
   studioUi = emptyStudioUi();
   selectedPhase = undefined; botRequestId = crypto.randomUUID();
   if (botPoll) clearTimeout(botPoll);
@@ -787,6 +860,7 @@ async function sendChat(retry = false): Promise<void> {
         pending = pending.slice(newline + 1);
         if (chatState !== state) continue;
         if (event.type === "route") state.route = event;
+        if (event.type === "budget") state.phase = `Connecting to the model… up to ${Math.round(event.ms / 60_000)} min`;
         if (event.type === "thinking") state.phase = event.message;
         if (event.type === "tool") {
           if (event.state === "running") state.tools.push({ name: event.name, state: event.state });
@@ -798,7 +872,7 @@ async function sendChat(retry = false): Promise<void> {
         }
         if (event.type === "answer") {
           const profile = chatProfiles().find((item) => item.id === state.profile);
-          state.messages.push({ role: "assistant", content: event.content, model: (profile ? `${profile.release} · ${selectedModel}` : state.route?.model ?? selectedModel), ...(event.usage ? { usage: event.usage } : {}), ...(event.elapsedMs !== undefined ? { elapsedMs: event.elapsedMs } : {}), tools: [...state.tools], ...(profile ? { assistant: profile.name } : {}) }); finished = true;
+          state.messages.push({ role: "assistant", content: event.content, model: (profile ? `${profile.release} · ${selectedModel}` : state.route?.model ?? selectedModel), ...(event.usage ? { usage: event.usage } : {}), ...(event.elapsedMs !== undefined ? { elapsedMs: event.elapsedMs } : {}), tools: [...state.tools], ...(event.evidence ? { evidence: event.evidence } : {}), ...(profile ? { assistant: profile.name } : {}) }); finished = true;
         }
         if (event.type === "error") { state.error = event.message; finished = true; }
         renderChat();
@@ -965,7 +1039,7 @@ document.addEventListener("input", (event) => {
   const key = form.dataset.draft!;
   const value = input.name === "tools" ? new FormData(form).getAll("tools").join(",") : input.type === "checkbox" ? String(input.checked) : input.value;
   studioUi.drafts[key] = { ...studioUi.drafts[key], [input.name]: value,
-    ...(form.hasAttribute("data-output-review") ? { expectedRevision: studioUi.drafts[key]?.expectedRevision ?? form.dataset.revision! } : {}),
+    ...(form.hasAttribute("data-output-review") || form.hasAttribute("data-review-command") ? { expectedRevision: studioUi.drafts[key]?.expectedRevision ?? form.dataset.revision! } : {}),
     ...(form.id === "agent-studio-editor" ? { expectedVersion: studioUi.drafts[key]?.expectedVersion ?? form.dataset.version! } : {}) };
 });
 document.addEventListener("change", (event) => {
@@ -1082,7 +1156,7 @@ function readPipelineConfig(): PipelineConfig {
 }
 document.addEventListener("click", async event => {
   const link = (event.target as Element).closest<HTMLAnchorElement>(".audit-links a[download]");
-  if (!link || link.origin !== location.origin || link.pathname !== "/api/audit-package") return;
+  if (!link || link.origin !== location.origin || !["/api/audit-package", "/api/agent-package-export"].includes(link.pathname)) return;
   event.preventDefault();
   try {
     const response = await fetch(link.href, { headers: await requestHeaders() });
@@ -1115,13 +1189,31 @@ function pipelineAction(action: string, note?: string): Promise<void> {
 }
 document.addEventListener("submit", (event) => {
   const form = event.target as HTMLFormElement;
+  if (form.hasAttribute("data-review-command")) {
+    event.preventDefault();
+    if (busy) return;
+    const fields = new FormData(form);
+    const reviewers = reviewerIds(fields.get("reviewers"));
+    const note = String(fields.get("note") ?? "");
+    void workflowCommand({ action: form.dataset.reviewCommand, runId: form.dataset.run,
+      expectedRevision: Number(form.dataset.revision), ...(note || form.dataset.reviewCommand !== "add_reviewers" ? { note } : {}),
+      ...(form.dataset.reviewCommand === "revise" ? { reason: String(fields.get("reason") ?? "") } : {}),
+      ...(reviewers.length || form.dataset.reviewCommand === "add_reviewers" ? { reviewers } : {}) }, form.dataset.draft);
+    return;
+  }
   if (!form.hasAttribute("data-output-review")) return;
   event.preventDefault();
   if (busy) return;
   // Submit the revision the person reviewed, even if a background refresh found newer work.
+  const fields = new FormData(form);
+  const reviewers = reviewerIds(fields.get("reviewers"));
   void workflowCommand({ action: "complete", runId: form.dataset.run,
-    expectedRevision: Number(form.dataset.revision), note: String(new FormData(form).get("note") ?? "") }, form.dataset.draft);
+    expectedRevision: Number(form.dataset.revision), note: String(fields.get("note") ?? ""), ...(reviewers.length ? { reviewers } : {}) }, form.dataset.draft);
 });
+/** "a, b" → ["a", "b"]: the people a handoff is proposed to. The server checks each one against the directory. */
+function reviewerIds(value: FormDataEntryValue | null): string[] {
+  return [...new Set(String(value ?? "").split(",").map(item => item.trim()).filter(Boolean))];
+}
 // Edit one stage without rewriting other stages or existing runs. The engine
 // still checks admin permissions, version conflicts and assistant eligibility.
 document.addEventListener("submit", (event) => {
@@ -1142,7 +1234,7 @@ document.addEventListener("submit", (event) => {
 });
 async function documentCommand(data: unknown, message: string): Promise<void> {
   lock(true);
-  try { await api("/api/documents", data); delete studioUi.error; await refresh(); notify(message); }
+  try { await api("/api/documents", data); if ((data as { action?: string }).action === "add_document") delete studioUi.drafts["document-add"]; delete studioUi.error; await refresh(); notify(message); }
   catch (error) { studioUi.error = (error as Error).message; render(); }
   finally { lock(false); }
 }
@@ -1153,7 +1245,7 @@ document.addEventListener("submit", (event) => {
   if (busy) return;
   const data = new FormData(form);
   if (form.id === "document-add") {
-    void documentCommand({ action: "add_document", title: String(data.get("title") ?? "").trim(), text: String(data.get("text") ?? "") }, "Document added.").then(() => form.reset());
+    void documentCommand({ action: "add_document", title: String(data.get("title") ?? "").trim(), text: String(data.get("text") ?? "") }, "Document added.");
   } else if (form.id === "document-attach") {
     void documentCommand({ action: "attach_to_run", documentId: form.dataset.document, runId: String(data.get("runId") ?? "") }, "Attached as reference material.");
   } else {
@@ -1202,6 +1294,32 @@ function watchSchedule(): void {
   const active = snapshot.schedule?.jobs.some((job) => job.status === "queued" || job.status === "running") || analystActive;
   if (active && !busy) scheduleWatch = setTimeout(() => { void refresh().catch(error => notify((error as Error).message, true)); }, analystActive ? 1000 : 4000);
 }
+document.addEventListener("click", event => {
+  const target = event.target as Element;
+  const exampleButton = target.closest<HTMLButtonElement>("[data-analyst-example]");
+  if (exampleButton && !busy) {
+    const example = ANALYST_EXAMPLES[Number(exampleButton.dataset.analystExample)];
+    const form = document.querySelector<HTMLFormElement>("#analyst-request");
+    if (!example || !form) return;
+    for (const name of ["county", "question", "scope"] as const) {
+      const field = form.elements.namedItem(name) as HTMLInputElement;
+      field.value = example[name];
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    delete form.dataset.requestId;
+    (form.elements.namedItem("question") as HTMLTextAreaElement).focus();
+  }
+  const downloadButton = target.closest<HTMLButtonElement>("[data-analyst-download]");
+  if (!downloadButton || busy) return;
+  const job = snapshot.analyst?.jobs.find(item => item.id === downloadButton.dataset.analystDownload);
+  const text = job && analystBrief(job);
+  if (!text || !job) return;
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = `public-data-brief-${job.id}.md`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
 document.addEventListener("submit", async event => {
   const form = event.target as HTMLFormElement;
   if (form.id !== "analyst-request") return;
@@ -1214,7 +1332,9 @@ document.addEventListener("submit", async event => {
       question: String(fields.get("question")), scope: String(fields.get("scope")) }) as { id: string };
     if (workspace !== selectedWorkspace || actor !== snapshot.actor) return;
     delete studioUi.drafts["analyst-request"];
-    navigate(`#/analyst/${job.id}`); await refresh();
+    // Load the saved run before navigating so it never flashes a false tenant error.
+    await refresh();
+    if (workspace === selectedWorkspace && actor === snapshot.actor) navigate(`#/analyst/${job.id}`);
   } catch (error) { if (workspace === selectedWorkspace && actor === snapshot.actor) notify((error as Error).message, true); }
   finally { lock(false); if (workspace === selectedWorkspace && actor === snapshot.actor) watchSchedule(); }
 });
@@ -1236,7 +1356,12 @@ document.addEventListener("submit", (event) => {
   const data = new FormData(target);
   if (target.id === "pipeline-start" || target.id === "desk-start") void pipelineCommand({ action: "start", requestId: runRequestId,
     title: String(data.get("title")), brief: String(data.get("brief")), ...(target.id === "desk-start" ? { materials: draftMaterials } : {}), ...(data.get("issueKey") ? { issueKey: String(data.get("issueKey")).trim() } : {}) });
-  if (target.id === "pipeline-output") void pipelineAction("complete", String(data.get("note")));
+  if (target.id === "pipeline-output") {
+    const reviewers = reviewerIds(data.get("reviewers"));
+    const run = snapshot.pipelines?.runs.find(item => item.id === selectedRun);
+    if (run) void pipelineCommand({ action: "complete", runId: run.id, expectedRevision: run.revision, note: String(data.get("note")), ...(reviewers.length ? { reviewers } : {}) });
+    else notify("Select an existing work item before changing it.", true);
+  }
   if (target.id === "pipeline-block") void pipelineAction("block", String(data.get("note")));
   if (target.id === "pipeline-config") { pipelineDraft = readPipelineConfig(); void pipelineCommand({ action: "configure", expectedVersion: snapshot.pipelines!.version, config: pipelineDraft }); }
 });
@@ -1317,7 +1442,7 @@ async function openWorkspace(id: string): Promise<void> {
   // Keep the old view and its request scope together until the next one is
   // ready. A failed open must not leave old forms targeting a new workspace.
   ++refreshVersion;
-  chatController?.abort(); chatController = undefined; chatState = emptyChat();
+  chatController?.abort(); chatController = undefined; chatState = emptyChat(); previousResourceChat = undefined; pendingResource = undefined; node<HTMLDialogElement>("#resource-assistant").close();
   selectedWorkspace = id;
   selectedPhase = undefined; botRequestId = crypto.randomUUID();
   if (botPoll) clearTimeout(botPoll);
@@ -1380,7 +1505,7 @@ function scheduleBotPoll(): void {
       if (view === "desk") {
         renderDeskSessions();
         const progress = document.querySelector("#work-progress");
-        if (progress && run) progress.outerHTML = workProgress(run, next, snapshot.actor, snapshot.roles, selectedPhase);
+        if (progress && run) progress.outerHTML = workProgress(run, next, snapshot.actor, snapshot.roles, selectedPhase, snapshot.approvers);
       }
       if (!next.busy) notify("Bot attempt finished. Review the timeline before handing off.");
       scheduleBotPoll();
@@ -1436,7 +1561,7 @@ document.addEventListener("click", async event => {
 function renderDeskSessions(): void {
   const list = document.querySelector("#desk-session-list");
   if (!list || !snapshot.pipelines) return;
-  list.innerHTML = workList(snapshot.pipelines, selectedRun, sessionQuery);
+  list.innerHTML = workList(snapshot.pipelines, selectedRun, sessionQuery, snapshot.actor);
   document.querySelectorAll<HTMLButtonElement>("[data-desk-filter]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.deskFilter === sessionFilter));
   });
@@ -1669,6 +1794,7 @@ document.addEventListener("submit", async event => {
       const agent = form.id === "agent-studio-import" ? importAgentDefinition(String(fields.get("definition") ?? ""), id)
         : agentConfigurableSchema.parse({ id, name: fields.get("name"), purpose: fields.get("purpose"), instructions: fields.get("instructions"), model: fields.get("model"),
           bot: { kind, requireSourceRead: fields.has("requireSourceRead"), allowedTools: fields.getAll("tools"), maxSteps: Number(fields.get("maxSteps")), timeoutSeconds: Number(fields.get("timeoutSeconds")), maxToolCalls: Number(fields.get("maxToolCalls")),
+            ...(String(fields.get("requiredSourcePaths") ?? "").trim() ? { requiredSourcePaths: String(fields.get("requiredSourcePaths")).split(/\r?\n/).map(path => path.trim()).filter(Boolean) } : {}),
             ...(existing?.bot.profile && existing.bot.kind === kind ? { profile: existing.bot.profile } : {}) } });
       config = saveConfigurable(pipeline.config, agent);
       id = agent.id;
@@ -1704,7 +1830,11 @@ document.addEventListener("submit", async event => {
   try {
     if (kind === "case") {
       await api("/api/agent-tests", { action: "save_case", ...(form.dataset.case ? { id: form.dataset.case } : {}), agentId: form.dataset.agent,
-        title: String(fields.get("title")), prompt: String(fields.get("prompt")), expected: String(fields.get("expected") ?? ""), source: String(fields.get("source") ?? "") });
+        title: String(fields.get("title")), prompt: String(fields.get("prompt")), expected: String(fields.get("expected") ?? ""), source: String(fields.get("source") ?? ""),
+        assertions: JSON.parse(String(fields.get("assertions") ?? "[]") || "[]"),
+        qualityPolicy: fields.has("qualityEnabled") ? { minSupportedRate: Number(fields.get("supportRate")) / 100,
+          minCitationRate: Number(fields.get("citationRate")) / 100,
+          expectedTools: String(fields.get("expectedTools") ?? "").split(",").map(tool => tool.trim()).filter(Boolean) } : null });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       if (form.dataset.draft) delete studioUi.drafts[form.dataset.draft];
       notify(form.dataset.case ? "Test saved." : "Test saved. Run it to see the result.");
@@ -1715,7 +1845,13 @@ document.addEventListener("submit", async event => {
       studioUi.drafts[draftKey] = { ...studioUi.drafts[draftKey], runId: "" };
       notify("Test started. The result appears here when it finishes.");
     } else {
-      await api("/api/agent-tests", { action: "review", runId: form.dataset.run, verdict: String(fields.get("verdict")), note: String(fields.get("note") ?? "") });
+      const quality = form.querySelector("[data-quality-review]") ? { complete: fields.has("qualityComplete"),
+        claims: Array.from(form.querySelectorAll<HTMLElement>("[data-claim]")).map(element => {
+          const index = element.dataset.claim;
+          return { claim: String(fields.get(`claim-${index}`)), verdict: String(fields.get(`claim-verdict-${index}`)),
+            source: String(fields.get(`claim-source-${index}`) ?? ""), quote: String(fields.get(`claim-quote-${index}`) ?? "") };
+        }) } : undefined;
+      await api("/api/agent-tests", { action: "review", runId: form.dataset.run, verdict: String(fields.get("verdict")), note: String(fields.get("note") ?? ""), ...(quality ? { quality } : {}) });
       if (scope !== `${selectedWorkspace}:${snapshot.actor}`) return;
       notify("Quality review recorded.");
     }
@@ -1723,6 +1859,13 @@ document.addEventListener("submit", async event => {
   } catch (error) {
     if (scope === `${selectedWorkspace}:${snapshot.actor}`) notify((error as Error).message, true);
   } finally { lock(false); }
+});
+document.addEventListener("change", event => {
+  const select = (event.target as Element).closest<HTMLSelectElement>("[data-test-baseline]");
+  if (!select || !route.id) return;
+  const key = `agent-test:${route.id}`;
+  studioUi.drafts[key] = { ...studioUi.drafts[key], baselineId: select.value };
+  render();
 });
 document.addEventListener("click", async event => {
   const button = (event.target as Element).closest<HTMLElement>("[data-test-edit], [data-test-delete], [data-test-show]");
@@ -1788,6 +1931,18 @@ document.addEventListener("click", async event => {
 });
 
 
+// The Connections directory: every connector's state from the server's own summaries, refreshed on request.
+let directory: { entries?: ConnectionEntry[]; error?: string; loading?: boolean } = {};
+let directoryScope = "";
+async function loadDirectory(): Promise<void> {
+  const scope = selectedWorkspace + ":" + snapshot.actor;
+  directory = { ...directory, loading: true }; if (view === "connections") render();
+  try {
+    const result = await api("/api/connections") as { entries: ConnectionEntry[] };
+    if (scope === selectedWorkspace + ":" + snapshot.actor) directory = { entries: result.entries };
+  } catch { if (scope === selectedWorkspace + ":" + snapshot.actor) directory = { error: "The connections directory could not be loaded. Refresh to retry." }; }
+  if (view === "connections") render();
+}
 async function loadChatAccess(): Promise<void> {
   if (chatAccessLoading) return;
   chatAccessLoading = true;
@@ -1815,22 +1970,23 @@ document.addEventListener("submit", async event => {
   const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   button.disabled = true;
   const provider = form.dataset.providerConnect;
+  const connectionScope = form.dataset.scope === "workspace" ? "workspace" as const : "personal" as const;
   const models = String(fields.get("models") ?? "").split(",").map(value => value.trim()).filter(Boolean);
   connectionFeedbackScope = scope;
-  connectionFeedback = { provider, models, state: "verifying" };
+  connectionFeedback = { provider, scope: connectionScope, models, state: "verifying" };
   // Only model IDs survive a retry. Credentials never enter rendered page state.
   key.value = "";
   if (view === "connections") render();
   try {
-    await api("/api/chat/connections", { action: "connect", provider,
+    await api("/api/chat/connections", { action: "connect", scope: connectionScope, provider,
       apiKey: fields.get("apiKey"), models });
     if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
     connectionFeedback = undefined;
-    notify("Connection saved. Choose its model in Chat.");
-    await loadChatAccess(); await loadChatModels();
-  } catch {
+    notify(connectionScope === "workspace" ? "Workspace connection verified and saved. Choose its model in Agent Studio or Chat." : "Connection saved. Choose its model in Chat.");
+    await loadChatAccess(); await loadChatModels(); void loadDirectory();
+  } catch (error) {
     if (scope === selectedWorkspace + ":" + snapshot.actor) {
-      connectionFeedback = { provider, models, state: "error", message: "Could not confirm the update. Check your connection, API key and model IDs." };
+      connectionFeedback = { provider, scope: connectionScope, models, state: "error", message: error instanceof Error && error.message ? error.message : "Could not confirm the update. Check your connection, API key and model IDs." };
     }
   } finally {
     key.value = ""; fields.delete("apiKey"); button.disabled = false; connectionBusy = false;
@@ -1839,17 +1995,27 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("click", async event => {
-  const button = (event.target as Element).closest<HTMLButtonElement>("[data-chat-access-refresh], [data-provider-disconnect], [data-chat-token]");
+  const button = (event.target as Element).closest<HTMLButtonElement>("[data-chat-access-refresh], [data-connections-refresh], [data-provider-disconnect], [data-provider-verify], [data-chat-token]");
   if (!button || connectionBusy) return;
-  if (button.hasAttribute("data-chat-access-refresh")) { connectionFeedback = undefined; void loadChatAccess(); return; }
+  if (button.hasAttribute("data-chat-access-refresh")) { connectionFeedback = undefined; void loadChatAccess(); void loadDirectory(); return; }
+  if (button.hasAttribute("data-connections-refresh")) { void loadDirectory(); return; }
   connectionBusy = true; button.disabled = true;
   const scope = selectedWorkspace + ":" + snapshot.actor;
+  const connectionScope = button.dataset.scope === "workspace" ? "workspace" as const : "personal" as const;
   try {
     if (button.dataset.providerDisconnect) {
-      await api("/api/chat/connections", { action: "disconnect", provider: button.dataset.providerDisconnect });
+      await api("/api/chat/connections", { action: "disconnect", scope: connectionScope, provider: button.dataset.providerDisconnect });
       if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
       connectionFeedback = undefined;
-      await loadChatAccess(); await loadChatModels();
+      await loadChatAccess(); await loadChatModels(); void loadDirectory();
+    } else if (button.dataset.providerVerify) {
+      // The harmless read again, with the saved key. The outcome is recorded on the connection either way.
+      const provider = button.dataset.providerVerify;
+      connectionFeedbackScope = scope; connectionFeedback = { provider, scope: connectionScope, models: [], state: "verifying" }; render();
+      try { await api("/api/chat/connections", { action: "verify", scope: connectionScope, provider }); if (scope === selectedWorkspace + ":" + snapshot.actor) { connectionFeedback = undefined; notify("Connection verified."); } }
+      catch (error) { if (scope === selectedWorkspace + ":" + snapshot.actor) connectionFeedback = { provider, scope: connectionScope, models: [], state: "error", message: error instanceof Error ? error.message : "Verification failed." }; }
+      if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
+      await loadChatAccess(); await loadChatModels(); void loadDirectory();
     } else {
       const result = await api("/api/chat/access", { action: button.dataset.chatToken }) as { token?: string; expiresAt?: string };
       if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
@@ -1897,4 +2063,42 @@ document.addEventListener("submit", async event => {
   } catch (error) {
     if (scope === `${selectedWorkspace}:${snapshot.actor}`) notify((error as Error).message, true);
   } finally { lock(false); }
+});
+
+async function packageCommand(command: unknown): Promise<void> {
+  if (busy) return;
+  const scope = selectedWorkspace + ":" + snapshot.actor;
+  lock(true);
+  try {
+    await api("/api/agent-packages", command);
+    if (scope !== selectedWorkspace + ":" + snapshot.actor) return;
+    await refresh();
+    notify("Package updated.");
+  } catch (error) {
+    if (scope === selectedWorkspace + ":" + snapshot.actor) notify((error as Error).message, true);
+  } finally { lock(false); }
+}
+document.addEventListener("click", event => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-package-action]");
+  if (!button || button.disabled) return;
+  void packageCommand({ action: button.dataset.packageAction, packageId: button.dataset.package, expectedHash: button.dataset.hash });
+});
+document.addEventListener("submit", event => {
+  const form = event.target as HTMLFormElement;
+  if (form.id === "package-search") {
+    event.preventDefault();
+    navigate("#/marketplace?collection=packages&q=" + encodeURIComponent(String(new FormData(form).get("q") ?? "")));
+    return;
+  }
+  const action = form.dataset.packageForm;
+  if (!action) return;
+  event.preventDefault();
+  const fields = new FormData(form);
+  const version = Number(form.dataset.version);
+  try {
+    if (action === "publish") void packageCommand({ action, agentId: fields.get("agentId"), expectedVersion: version });
+    if (action === "assign") void packageCommand({ action, installationId: form.dataset.installation, stageId: fields.get("stageId"), expectedVersion: version });
+    if (action === "install") void packageCommand({ action, packageId: form.dataset.package, expectedHash: form.dataset.hash, upgradedFrom: fields.get("upgradedFrom") });
+    if (action === "import") void packageCommand({ action, expectedVersion: version, template: JSON.parse(String(fields.get("template"))) });
+  } catch { notify("Enter valid template JSON. Only a draft definition can be imported.", true); }
 });

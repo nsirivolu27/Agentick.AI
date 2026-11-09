@@ -58,6 +58,27 @@ function journey(studio: ModelStudio, text = goodDataset()) {
   return { snapshot: s, project, dataset, config, job, evaluation, release: s.releases[0]! };
 }
 
+test("installation rechecks approved release evidence instead of trusting its status label", () => {
+  let saved: StudioState | undefined;
+  const studio = createModelStudio({ storage: "memory", files: memoryDatasetFiles(), persistence: {
+    read: () => saved ? structuredClone(saved) : undefined,
+    commit: (_workspace, state) => { saved = structuredClone(state); },
+  } });
+  const { release } = journey(studio);
+  const valid = structuredClone(saved!);
+  const install = () => run(studio, AUTHOR, ["author"], { action: "assign_profile", name: "Pinned assistant", releaseId: release.id });
+  saved!.releases[0]!.approvals = [];
+  refuse(409, /valid approvals/, install);
+  saved = structuredClone(valid);
+  saved.evaluations[0]!.passed = false;
+  refuse(409, /no longer eligible/, install);
+  saved = structuredClone(valid);
+  saved.jobs[0]!.artifact!.hash = "f".repeat(64);
+  assert.throws(install, /changed|stale/i);
+  saved = structuredClone(valid);
+  assert.equal(install().profiles[0]!.releaseId, release.id);
+});
+
 test("the vertical slice runs from project to chat profile with persisted, hashed records", () => {
   const studio = memoryModelStudio({ now: () => "2026-09-25T12:00:00.000Z" });
   const { snapshot, release, job, evaluation } = journey(studio);

@@ -37,6 +37,7 @@ export function addCanvasAgent(config: PipelineConfig, agentId: string, stageId:
   const agent = next.configurables!.find(item => item.id === agentId)!;
   // New work starts with a review gate; arranging nodes cannot grant approval.
   next.stages.splice(position, 0, { id: stageId, name: agent.name, agent: agent.name, instructions: agent.instructions,
+    inputStages: position ? [next.stages[position - 1]!.id] : [], outputContract: agent.purpose,
     model: agent.model, bot: structuredClone(agent.bot), context: "Work item, attached references and completed stage outputs",
     approval: true, jiraStatus: "In Review" });
   return next;

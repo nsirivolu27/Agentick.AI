@@ -6,7 +6,7 @@ import { setting } from "../env.js";
 import type { ChatConfiguration, ChatModelOption, AgentModel } from "./chat.js";
 import { chatRequestSchema } from "./chat.js";
 import { cloudModel } from "./model-catalog.js";
-import { createChatConnections, providerLabels } from "./chat-connections.js";
+import { createChatConnections, providerLabels, WORKSPACE_CONNECTION_ACTOR, type ConnectionSummary } from "./chat-connections.js";
 import { chatPlanSchema, decideChatRoute, type ChatPlan, type ChatRoute } from "./chat-routing.js";
 import { usageOf } from "./model-usage.js";
 import type { ChatVault } from "./chat-vault.js";
@@ -25,7 +25,9 @@ export function loadChatPlan(): ChatPlan | undefined {
 }
 export interface ChatAccessSummary {
   tier: "free" | "paid"; plan?: "free" | "pro" | "max"; auto: boolean; managedReady: boolean;
-  connections: { provider: string; models: string[]; connectedAt: string }[];
+  connections: ConnectionSummary[];
+  /** The workspace's own connections, usable by agents. Provider, models and dates only; never a key. */
+  workspaceConnections?: ConnectionSummary[];
   dailyTokens?: number; accountedTokens: number; budgetDate: string;
   mcp: { active: boolean; expiresAt?: string };
 }
@@ -62,7 +64,8 @@ export function createChatAccess(options: {
     const level = await tier(workspace);
     const isPaid = level !== "free";
     const plan = allowance(level);
-    const personal = connections.read(workspace, actor);
+    const personal = actor === WORKSPACE_CONNECTION_ACTOR ? [] : connections.read(workspace, actor);
+    const shared = connections.readWorkspace(workspace);
     const server = base.modelOptions ? await base.modelOptions() : (base.listModels ? await base.listModels() : [base.model]).map(id => ({
       id, label: id, provider: base.provider, local: base.provider === "ollama", available: true, detail: "Configured workspace model.", outputLimit: base.outputLimit === true,
     }));
@@ -76,18 +79,54 @@ export function createChatAccess(options: {
       id: `personal/${connection.provider}/${model}`, label: model, provider: `${providerLabels[connection.provider]} · your account`,
       available: true, local: false, outputLimit: true, detail: "API account verified. The provider bills your usage; inference access still depends on the selected model.",
     });
+    // Workspace connections: an administrator connected them for agents and stages; members may chat with them too.
+    for (const connection of shared) for (const model of connection.models) choices.push({
+      id: `workspace/${connection.provider}/${model}`, label: model, provider: `${providerLabels[connection.provider]} · workspace connection`,
+      available: !connection.lastError, local: false, outputLimit: true,
+      detail: connection.lastError ? `Last verification failed: ${connection.lastError}` : `Connected by an administrator for this workspace${connection.verifiedAt ? `, verified ${connection.verifiedAt.slice(0, 16).replace("T", " ")}` : ""}. The provider bills the workspace account.`,
+    });
     const config: ChatConfiguration = {
       provider: base.provider, model: base.model, modelOptions: async () => choices,
       listModels: async () => choices.filter(model => model.available).map(model => model.id),
       async loadModel(id = base.model, limits) {
         const choice = choices.find(model => model.id === id);
         if (!choice?.available) throw new ChatAccessError(403, "This model is not available for your account.");
+        if (id.startsWith("workspace/")) {
+          // Resolved against this workspace only; a definition in another workspace naming this id gets its own connection or nothing.
+          const current = connections.readWorkspace(workspace).find(connection => id.startsWith(`workspace/${connection.provider}/`));
+          const model = current ? id.slice(`workspace/${current.provider}/`.length) : "";
+          if (!current?.models.includes(model) || current.lastError) throw new ChatAccessError(403, "This workspace connection was removed, changed or failed verification. Refresh models.");
+          const provider = cloudModel(current.provider, model, current.apiKey, options.request ?? fetch, undefined, undefined, limits?.maxOutputTokens);
+          const stillConnected = () => {
+            const latest = connections.readWorkspace(workspace).find(item => item.provider === current.provider);
+            if (!latest || latest.apiKey !== current.apiKey || !latest.models.includes(model) || latest.lastError) {
+              throw new ChatAccessError(403, "This workspace connection was removed or changed. Refresh models.");
+            }
+          };
+          return {
+            async invoke(prompt, invocation) { stillConnected(); return provider.invoke(prompt, invocation); },
+            // Native tool use is re-checked on every turn too, so a disconnect mid-conversation stops the next call.
+            ...(provider.converse ? { converse: async (conversation, invocation) => { stillConnected(); return provider.converse!(conversation, invocation); } } : {}),
+          } satisfies AgentModel;
+        }
         if (id.startsWith("personal/")) {
           // Read again so disconnecting a provider invalidates an already prepared request.
           const current = connections.read(workspace, actor).find(connection => id.startsWith(`personal/${connection.provider}/`));
           const model = current ? id.slice(`personal/${current.provider}/`.length) : "";
           if (!current?.models.includes(model)) throw new ChatAccessError(403, "This provider connection was removed. Refresh models.");
-          return cloudModel(current.provider, model, current.apiKey, options.request ?? fetch, undefined, undefined, limits?.maxOutputTokens);
+          const provider = cloudModel(current.provider, model, current.apiKey, options.request ?? fetch, undefined, undefined, limits?.maxOutputTokens);
+          // A cached model must not retain authority after disconnect or
+          // credential rotation between turns of an agent conversation.
+          const stillConnected = () => {
+            const latest = connections.read(workspace, actor).find(item => item.provider === current.provider);
+            if (!latest || latest.apiKey !== current.apiKey || !latest.models.includes(model)) {
+              throw new ChatAccessError(403, "This provider connection was removed or changed. Refresh models.");
+            }
+          };
+          return {
+            async invoke(prompt, invocation) { stillConnected(); return provider.invoke(prompt, invocation); },
+            ...(provider.converse ? { converse: async (conversation, invocation) => { stillConnected(); return provider.converse!(conversation, invocation); } } : {}),
+          } satisfies AgentModel;
         }
         const managed = !choice.local && options.managedLogin;
         const currentPlan = allowance(await tier(workspace));
@@ -121,8 +160,13 @@ export function createChatAccess(options: {
     };
     return config;
   }
+  /** The catalog agents and stages see: server models plus each workspace's own connections, bound per workspace. */
+  function agentConfiguration(): ChatConfiguration {
+    return { ...base, forWorkspace: workspace => configuration(workspace, WORKSPACE_CONNECTION_ACTOR) };
+  }
   return {
     configuration,
+    agentConfiguration,
     history: createChatHistory(vault),
     async summary(workspace: string, actor: string): Promise<ChatAccessSummary> {
       const level = await tier(workspace);
@@ -132,7 +176,7 @@ export function createChatAccess(options: {
       const grant = record ? grantSchema.parse(record) : undefined;
       const current = usage(workspace);
       return { tier: isPaid ? "paid" : "free", plan: level, auto: isPaid, managedReady: !!options.plan && options.managedLogin,
-        connections: connections.list(workspace, actor), ...(plan ? { dailyTokens: plan.dailyTokens } : {}),
+        connections: connections.list(workspace, actor), workspaceConnections: connections.listWorkspace(workspace), ...(plan ? { dailyTokens: plan.dailyTokens } : {}),
         accountedTokens: current.tokens, budgetDate: current.date,
         mcp: { active: !!grant && grant.expiresAt > now(), ...(grant ? { expiresAt: new Date(grant.expiresAt).toISOString() } : {}) } };
     },
@@ -153,7 +197,7 @@ export function createChatAccess(options: {
       }
       const model = route?.model ?? input.model ?? config.model;
       const rule = plan?.models.find(item => item.id === model);
-      const managed = options.managedLogin && !choices.find(item => item.id === model)?.local && !model.startsWith("personal/");
+      const managed = options.managedLogin && !choices.find(item => item.id === model)?.local && !model.startsWith("personal/") && !model.startsWith("workspace/");
       const maxOutputTokens = route?.maxOutputTokens ?? (managed && rule ? Math.min(input.maxOutputTokens ?? rule.maxOutputTokens, rule.maxOutputTokens) : input.maxOutputTokens);
       return { config, model, maxOutputTokens, route };
     },
